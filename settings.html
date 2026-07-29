@@ -1,0 +1,108 @@
+<div id="stmp_settings">
+    <div class="inline-drawer">
+        <div class="inline-drawer-toggle inline-drawer-header">
+            <b>Multiplayer</b>
+            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+        </div>
+
+        <div class="inline-drawer-content">
+
+            <div class="stmp-status-bar">
+                <span id="stmp_status_dot" class="stmp-dot" data-state="idle"></span>
+                <span id="stmp_status_text">Not connected</span>
+                <span class="flex1"></span>
+                <span id="stmp_cards" class="stmp-muted"></span>
+            </div>
+
+            <div id="stmp_error" class="stmp-error" hidden></div>
+
+            <!-- ────────────────  HOST  ──────────────── -->
+            <div class="stmp-section">
+                <div class="stmp-section-title"><i class="fa-solid fa-tower-broadcast"></i> Host a room</div>
+
+                <div class="stmp-grid">
+                    <label for="stmp_room_name">Room name</label>
+                    <input id="stmp_room_name" class="text_pole" type="text" maxlength="60" placeholder="SillyTavern room">
+
+                    <label for="stmp_port">Port</label>
+                    <input id="stmp_port" class="text_pole" type="number" min="1024" max="65535" step="1">
+
+                    <label for="stmp_max_peers">Max players</label>
+                    <input id="stmp_max_peers" class="text_pole" type="number" min="2" max="8" step="1">
+
+                    <label for="stmp_parity_strictness">Extension check</label>
+                    <select id="stmp_parity_strictness" class="text_pole">
+                        <option value="manifest">Name and version (fast)</option>
+                        <option value="commit">Name, version and git commit (exact)</option>
+                    </select>
+                </div>
+
+                <label class="checkbox_label" for="stmp_bind_lan">
+                    <input id="stmp_bind_lan" type="checkbox">
+                    <span>Allow players on my local network
+                        <small class="stmp-muted">Off = loopback only, useful when tunnelling the port yourself.</small>
+                    </span>
+                </label>
+
+                <label class="checkbox_label" for="stmp_require_parity">
+                    <input id="stmp_require_parity" type="checkbox">
+                    <span>Require matching extensions
+                        <small class="stmp-muted">Players whose extensions differ are held at the door and offered a sync.</small>
+                    </span>
+                </label>
+
+                <div class="stmp-buttons">
+                    <div id="stmp_host_start" class="menu_button"><i class="fa-solid fa-play"></i> Start hosting</div>
+                    <div id="stmp_pick_cards" class="menu_button"><i class="fa-solid fa-id-badge"></i> Choose shared characters</div>
+                </div>
+
+                <div id="stmp_host_running" hidden>
+                    <label for="stmp_code_output">Connection code</label>
+                    <div class="stmp-code-row">
+                        <input id="stmp_code_output" class="text_pole stmp-code" type="text" readonly spellcheck="false">
+                        <div id="stmp_copy_code" class="menu_button" title="Copy"><i class="fa-solid fa-copy"></i></div>
+                    </div>
+                    <div class="stmp-muted">Reachable at: <span id="stmp_addresses"></span></div>
+                    <div class="stmp-buttons">
+                        <div id="stmp_rotate" class="menu_button" title="Invalidate the current code"><i class="fa-solid fa-rotate"></i> New code</div>
+                        <div id="stmp_host_stop" class="menu_button redWarningBG"><i class="fa-solid fa-stop"></i> Stop hosting</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ────────────────  JOIN  ──────────────── -->
+            <div class="stmp-section">
+                <div class="stmp-section-title"><i class="fa-solid fa-plug"></i> Join a room</div>
+
+                <label for="stmp_code_input">Connection code</label>
+                <div class="stmp-code-row">
+                    <input id="stmp_code_input" class="text_pole stmp-code" type="text" spellcheck="false"
+                           autocomplete="off" placeholder="STMP1-XXXXX-XXXXX-…">
+                    <div id="stmp_join" class="menu_button"><i class="fa-solid fa-right-to-bracket"></i> Join</div>
+                </div>
+
+                <label class="checkbox_label" for="stmp_auto_reconnect">
+                    <input id="stmp_auto_reconnect" type="checkbox">
+                    <span>Reconnect automatically if the connection drops</span>
+                </label>
+
+                <div class="stmp-buttons">
+                    <div id="stmp_sync" class="menu_button" hidden><i class="fa-solid fa-arrows-rotate"></i> Sync extensions</div>
+                    <div id="stmp_leave" class="menu_button redWarningBG" hidden><i class="fa-solid fa-door-open"></i> Leave</div>
+                </div>
+            </div>
+
+            <!-- ────────────────  ROOM  ──────────────── -->
+            <div class="stmp-section">
+                <div class="stmp-section-title"><i class="fa-solid fa-users"></i> In the room</div>
+                <ul id="stmp_roster" class="stmp-roster"></ul>
+            </div>
+
+            <div class="stmp-section">
+                <div class="stmp-section-title"><i class="fa-solid fa-list"></i> Activity</div>
+                <div id="stmp_log" class="stmp-log"></div>
+            </div>
+
+        </div>
+    </div>
+</div>
