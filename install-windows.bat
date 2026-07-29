@@ -6,7 +6,7 @@ REM ---------------------------------------------------------------------------
 REM  Double-clickable wrapper around install.mjs for Windows.
 REM
 REM  It exists because the common failure is not the install itself, it is that
-REM  `node` is not on PATH — the SillyTavern Launcher bundles its own Node and
+REM  `node` is not on PATH - the SillyTavern Launcher bundles its own Node and
 REM  does not always add it to the system PATH. So this looks for Node in the
 REM  places the Launcher and the standard installer put it before giving up.
 REM ---------------------------------------------------------------------------
@@ -17,7 +17,43 @@ echo.
 echo  SillyTavern Multiplayer - relay installer
 echo  =========================================
 echo.
+echo  Folder: %~dp0
+echo.
 
+REM ---------------------------------------------------------------------------
+REM  Sanity check before anything else: this file only works from inside the
+REM  extension's own folder, because that is where install.mjs and the relay
+REM  source live. Copying just the .bat somewhere like Downloads is an easy
+REM  mistake, and without this check it fails with a raw Node stack trace.
+REM ---------------------------------------------------------------------------
+
+if not exist "%~dp0install.mjs" goto :wrongfolder
+if not exist "%~dp0manifest.json" goto :wrongfolder
+if not exist "%~dp0server\index.js" goto :wrongfolder
+goto :findnode
+
+:wrongfolder
+echo  [X] This file is not in the extension folder.
+echo.
+echo      It has to sit next to install.mjs and manifest.json. Right now those
+echo      are not here, so there is nothing for it to install.
+echo.
+echo      Move this file into your installed extension folder, which looks like:
+echo.
+echo        ...\SillyTavern\data\default-user\extensions\Vibed-ST-Muliplayer\
+echo.
+echo      That folder already contains install.mjs. Once this .bat is beside it,
+echo      double-click it again.
+echo.
+echo      Tip: you do not actually need this file. In that folder, click the
+echo      address bar in Explorer, type  cmd  and press Enter, then run:
+echo.
+echo          node install.mjs --enable
+echo.
+pause
+exit /b 1
+
+:findnode
 set "NODE_EXE="
 
 REM 1. Node already on PATH.

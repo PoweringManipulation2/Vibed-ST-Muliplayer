@@ -176,6 +176,17 @@ function checkWs(root) {
 
 say('\nSillyTavern-Multiplayer — server plugin installer\n');
 
+// Diagnose "run from the wrong folder" before trying to locate SillyTavern.
+// Otherwise the failure surfaces as "could not find your SillyTavern folder",
+// which sends people looking for the wrong problem.
+for (const required of ['manifest.json', path.join('server', 'index.js')]) {
+    if (fs.existsSync(path.join(HERE, required))) continue;
+    fail(`This script is not inside the extension folder — ${required} is missing from ${HERE}.\n`
+        + '  It has to run from the folder SillyTavern installed the extension into, which looks like:\n'
+        + '    <SillyTavern>/data/<user>/extensions/<extension-folder>/\n'
+        + '  Copy it there and run it again, or point it at the extension with --root if you moved things around.');
+}
+
 const root = findSillyTavernRoot();
 const pluginsDir = path.join(root, 'plugins');
 const target = path.join(pluginsDir, PLUGIN_DIR_NAME);
