@@ -1,0 +1,444 @@
+/*
+ * SillyTavern-Multiplayer styles.
+ * Everything is scoped under .stmp-* or #stmp_* so no host styles are touched,
+ * and colours come from SillyTavern's own theme variables so the panel follows
+ * whatever theme the user has picked.
+ */
+
+#stmp_settings {
+    --stmp-gap: 8px;
+    --stmp-radius: 6px;
+}
+
+#stmp_settings .stmp-section {
+    margin-block: 12px;
+    padding: 10px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--stmp-radius);
+    background-color: var(--black30a);
+}
+
+#stmp_settings .stmp-section-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-weight: 600;
+    opacity: 0.9;
+}
+
+#stmp_settings .stmp-grid {
+    display: grid;
+    grid-template-columns: minmax(90px, max-content) 1fr;
+    gap: var(--stmp-gap);
+    align-items: center;
+    margin-bottom: var(--stmp-gap);
+}
+
+#stmp_settings .stmp-grid > label {
+    font-size: 0.9em;
+    opacity: 0.85;
+}
+
+#stmp_settings .stmp-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--stmp-gap);
+    margin-top: var(--stmp-gap);
+}
+
+#stmp_settings .stmp-code-row {
+    display: flex;
+    gap: var(--stmp-gap);
+    align-items: center;
+}
+
+#stmp_settings .stmp-code {
+    flex: 1;
+    font-family: var(--monoFontFamily, monospace);
+    letter-spacing: 0.06em;
+    font-size: 0.95em;
+}
+
+#stmp_settings .stmp-muted {
+    opacity: 0.65;
+    font-size: 0.85em;
+}
+
+#stmp_settings .stmp-error {
+    margin: 8px 0;
+    padding: 8px 10px;
+    border-left: 3px solid var(--warning, #c94f4f);
+    border-radius: var(--stmp-radius);
+    background-color: rgb(201 79 79 / 12%);
+    font-size: 0.9em;
+}
+
+/* ── status ─────────────────────────────────────────────────────────────── */
+
+#stmp_settings .stmp-status-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--stmp-gap);
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+
+#stmp_settings .stmp-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background-color: #7a7a7a;
+    flex-shrink: 0;
+}
+
+#stmp_settings .stmp-dot[data-state="connected"] { background-color: #4caf50; }
+#stmp_settings .stmp-dot[data-state="error"]     { background-color: #d9534f; }
+
+#stmp_settings .stmp-dot[data-state="starting"],
+#stmp_settings .stmp-dot[data-state="connecting"],
+#stmp_settings .stmp-dot[data-state="verifying"] {
+    background-color: #e0a52a;
+    animation: stmp-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes stmp-pulse {
+    50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #stmp_settings .stmp-dot { animation: none; }
+}
+
+/* ── roster ─────────────────────────────────────────────────────────────── */
+
+#stmp_settings .stmp-roster {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+#stmp_settings .stmp-roster li {
+    display: flex;
+    align-items: center;
+    gap: var(--stmp-gap);
+    padding: 4px 0;
+}
+
+#stmp_settings .stmp-roster small {
+    opacity: 0.6;
+}
+
+#stmp_settings .stmp-kick {
+    margin-left: auto;
+    padding: 0 8px;
+    line-height: 1.6;
+}
+
+/* ── activity log ───────────────────────────────────────────────────────── */
+
+#stmp_settings .stmp-log {
+    max-height: 150px;
+    overflow-y: auto;
+    font-family: var(--monoFontFamily, monospace);
+    font-size: 0.78em;
+    line-height: 1.5;
+}
+
+#stmp_settings .stmp-log-line { opacity: 0.8; }
+#stmp_settings .stmp-log-error   { color: #e08585; opacity: 1; }
+#stmp_settings .stmp-log-warn    { color: #e0bb5c; opacity: 1; }
+#stmp_settings .stmp-log-success { color: #7fc47f; opacity: 1; }
+
+#stmp_settings .stmp-busy {
+    pointer-events: none;
+    opacity: 0.55;
+}
+
+/* ── popups ─────────────────────────────────────────────────────────────── */
+
+.stmp-picker .stmp-pick-list {
+    max-height: 45vh;
+    overflow-y: auto;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.stmp-pick-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: var(--stmp-radius, 6px);
+    cursor: pointer;
+}
+
+.stmp-pick-row img {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    object-fit: cover;
+}
+
+.stmp-pick-row span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.stmp-sync .stmp-diff-group {
+    margin-top: 10px;
+}
+
+.stmp-sync ul {
+    margin: 4px 0 0;
+    padding-left: 20px;
+    max-height: 22vh;
+    overflow-y: auto;
+}
+
+.stmp-sync code {
+    padding: 0 4px;
+    border-radius: 3px;
+    background-color: var(--black30a);
+}
+
+.stmp-inline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 14px;
+    font-size: 0.9em;
+}
+
+/* ── cloud badge on hosted character cards ─────────────────────────────── */
+
+#rm_print_characters_block .character_select.stmp-remote .avatar {
+    position: relative;
+}
+
+#rm_print_characters_block .stmp-cloud {
+    position: absolute;
+    right: -3px;
+    bottom: -3px;
+    padding: 3px;
+    font-size: 0.7em;
+    border-radius: 50%;
+    color: var(--SmartThemeQuoteColor, #6fb3e0);
+    background-color: var(--SmartThemeBlurTintColor, rgb(20 20 20 / 90%));
+    box-shadow: 0 0 0 1px var(--SmartThemeBorderColor);
+    pointer-events: none;
+}
+
+/* Offline: still visible in the list, visibly not usable. */
+#rm_print_characters_block .character_select.stmp-remote.stmp-offline {
+    opacity: 0.55;
+    filter: grayscale(65%);
+    cursor: not-allowed;
+}
+
+#rm_print_characters_block .character_select.stmp-remote.stmp-offline:hover {
+    opacity: 0.75;
+}
+
+#rm_print_characters_block .character_select.stmp-remote:not(.stmp-offline) .stmp-cloud {
+    color: #7fc47f;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   Player chat (out of character)
+
+   A floating panel rather than a drawer section, because planning happens
+   while the roleplay is on screen. Nothing rendered here is part of the chat
+   DOM, so SillyTavern's own message styles and scroll handling are untouched.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+#stmp_ooc_toggle {
+    position: relative;
+    cursor: pointer;
+}
+
+#stmp_ooc_toggle.stmp-ooc-has-unread {
+    color: var(--SmartThemeQuoteColor, #6fb3e0);
+}
+
+#stmp_ooc_toggle .stmp-ooc-badge {
+    position: absolute;
+    top: -4px;
+    right: -6px;
+    min-width: 15px;
+    padding: 0 3px;
+    font-family: var(--mainFontFamily, sans-serif);
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 15px;
+    text-align: center;
+    color: #fff;
+    background-color: #d9534f;
+    border-radius: 8px;
+    pointer-events: none;
+}
+
+#stmp_ooc_panel {
+    position: fixed;
+    right: 16px;
+    bottom: 84px;
+    z-index: 3000;
+    display: flex;
+    flex-direction: column;
+    width: min(380px, calc(100vw - 32px));
+    height: min(440px, 60vh);
+    overflow: hidden;
+    color: var(--SmartThemeBodyColor);
+    background-color: var(--SmartThemeBlurTintColor, rgb(20 20 20 / 96%));
+    backdrop-filter: blur(var(--SmartThemeBlurStrength, 10px));
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 8px;
+    box-shadow: 0 8px 28px rgb(0 0 0 / 45%);
+}
+
+#stmp_ooc_panel .stmp-ooc-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+    cursor: move;
+    touch-action: none;
+    user-select: none;
+}
+
+#stmp_ooc_panel .stmp-ooc-title {
+    font-weight: 600;
+}
+
+#stmp_ooc_panel .stmp-ooc-hint {
+    opacity: 0.55;
+    font-size: 0.75em;
+}
+
+#stmp_ooc_panel .stmp-ooc-close {
+    cursor: pointer;
+    padding: 2px 4px;
+    opacity: 0.7;
+}
+
+#stmp_ooc_panel .stmp-ooc-close:hover {
+    opacity: 1;
+}
+
+#stmp_ooc_panel .stmp-ooc-log {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+#stmp_ooc_panel .stmp-ooc-empty {
+    margin: auto;
+    padding: 0 16px;
+    text-align: center;
+    opacity: 0.5;
+    font-size: 0.85em;
+}
+
+#stmp_ooc_panel .stmp-ooc-row {
+    padding: 5px 8px;
+    border-radius: 6px;
+    border-left: 2px solid var(--SmartThemeBorderColor);
+    background-color: var(--black30a);
+    max-width: 92%;
+}
+
+#stmp_ooc_panel .stmp-ooc-row.stmp-ooc-mine {
+    align-self: flex-end;
+    border-left: none;
+    border-right: 2px solid var(--SmartThemeQuoteColor, #6fb3e0);
+}
+
+#stmp_ooc_panel .stmp-ooc-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-bottom: 2px;
+    font-size: 0.75em;
+}
+
+#stmp_ooc_panel .stmp-ooc-who {
+    font-weight: 600;
+    opacity: 0.9;
+}
+
+#stmp_ooc_panel .stmp-ooc-crown {
+    font-size: 0.85em;
+    color: #e0bb5c;
+}
+
+#stmp_ooc_panel .stmp-ooc-when {
+    opacity: 0.45;
+}
+
+#stmp_ooc_panel .stmp-ooc-text {
+    font-size: 0.92em;
+    line-height: 1.4;
+    /* Player text is arbitrary input: wrap it, never let it widen the panel. */
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+#stmp_ooc_panel .stmp-ooc-typing {
+    flex-shrink: 0;
+    min-height: 1.1em;
+    padding: 0 10px;
+    font-size: 0.75em;
+    font-style: italic;
+    opacity: 0.55;
+}
+
+#stmp_ooc_panel .stmp-ooc-compose {
+    flex-shrink: 0;
+    display: flex;
+    gap: 6px;
+    align-items: flex-end;
+    padding: 8px 10px;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+}
+
+#stmp_ooc_panel .stmp-ooc-input {
+    flex: 1;
+    resize: none;
+    min-height: 2.6em;
+    max-height: 7em;
+    font-size: 0.9em;
+}
+
+#stmp_ooc_panel .stmp-ooc-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+#stmp_ooc_panel .stmp-ooc-actions .menu_button {
+    margin: 0;
+    padding: 3px 7px;
+    font-size: 0.8em;
+    white-space: nowrap;
+}
+
+@media (width <= 600px) {
+    #stmp_ooc_panel {
+        left: 8px;
+        right: 8px;
+        bottom: 76px;
+        width: auto;
+        height: min(50vh, 380px);
+    }
+}
