@@ -48,6 +48,8 @@ const DEFAULT_SETTINGS = Object.freeze({
     autoReconnect: true,
     /** Avatar filenames the host has chosen to share. */
     sharedCards: [],
+    /** Remembered player-chat panel geometry: {left, top, width, height, collapsed}. */
+    oocPanel: {},
 });
 
 /** @type {MultiplayerSession|null} */

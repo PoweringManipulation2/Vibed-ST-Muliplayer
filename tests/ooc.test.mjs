@@ -22,7 +22,7 @@ const root = path.resolve(here, '..');
 
 // A DOM stub is enough: the channel guards every query with `?.`, so with no
 // panel mounted it exercises the state and protocol paths and skips rendering.
-const { OOCChannel } = await import(path.join(root, 'lib/ooc.js'));
+const { OOCChannel, clampGeometry, PANEL_BOUNDS } = await import(path.join(root, 'lib/ooc.js'));
 const { OOC, OP } = await import(path.join(root, 'lib/protocol.js'));
 
 let passed = 0;
@@ -64,8 +64,9 @@ function makeContext() {
     };
 }
 
-function makeChannel({ connected = true, peerId = 'me' } = {}) {
+function makeChannel({ connected = true, peerId = 'me', panel = {} } = {}) {
     const context = makeContext();
+    const settings = { oocPanel: { ...panel } };
     const sent = [];
     const toasts = [];
     const channel = new OOCChannel({
@@ -79,8 +80,11 @@ function makeChannel({ connected = true, peerId = 'me' } = {}) {
             warning: (m, t) => toasts.push(['warning', m, t]),
             error: (m, t) => toasts.push(['error', m, t]),
         },
+        settings: () => settings,
+        save: () => { saves += 1; },
     });
-    return { channel, context, sent, toasts };
+    let saves = 0;
+    return { channel, context, sent, toasts, settings, saveCount: () => saves };
 }
 
 const relayed = (overrides = {}) => ({
@@ -229,6 +233,132 @@ await test('the transcript survives a disconnect but state is cleared on reset',
     channel.reset();
     assert.equal(channel.messages.length, 0);
     assert.equal(channel.unread, 0);
+});
+
+console.log('\nPanel geometry');
+
+const view = { width: 1600, height: 900 };
+
+await test('with nothing saved, it lands bottom-right clear of the send bar', () => {
+    const g = clampGeometry({}, view);
+    assert.equal(g.width, PANEL_BOUNDS.defaultWidth);
+    assert.equal(g.height, PANEL_BOUNDS.defaultHeight);
+    assert.equal(g.left, view.width - g.width - 16);
+    assert.equal(g.top, view.height - g.height - 84);
+});
+
+await test('a saved position and size are honoured', () => {
+    const g = clampGeometry({ left: 300, top: 120, width: 520, height: 600 }, view);
+    assert.deepEqual(g, { left: 300, top: 120, width: 520, height: 600 });
+});
+
+await test('a panel saved off a bigger screen is pulled back into reach', () => {
+    // Saved on a 3840-wide monitor, reopened on a laptop.
+    const g = clampGeometry({ left: 3400, top: 1800, width: 380, height: 440 }, { width: 1280, height: 720 });
+    assert.ok(g.left + PANEL_BOUNDS.minVisible <= 1280, 'left edge must stay reachable');
+    assert.ok(g.top + PANEL_BOUNDS.minVisible <= 720, 'top edge must stay reachable');
+    assert.ok(g.left >= PANEL_BOUNDS.minVisible - g.width);
+});
+
+await test('the title bar can never be dragged fully off any edge', () => {
+    for (const attempt of [
+        { left: -100000, top: -100000 },
+        { left: 100000, top: 100000 },
+        { left: -5000, top: 4000 },
+    ]) {
+        const g = clampGeometry({ ...attempt, width: 380, height: 440 }, view);
+        assert.ok(g.left + g.width >= PANEL_BOUNDS.minVisible, `left ${g.left} leaves nothing grabbable`);
+        assert.ok(g.left <= view.width - PANEL_BOUNDS.minVisible, `left ${g.left} is past the right edge`);
+        assert.ok(g.top >= 0, 'the title bar must not go above the viewport');
+        assert.ok(g.top <= view.height - PANEL_BOUNDS.minVisible, 'the title bar must stay on screen');
+    }
+});
+
+await test('size is bounded below and above', () => {
+    const tiny = clampGeometry({ width: 10, height: 10 }, view);
+    assert.equal(tiny.width, PANEL_BOUNDS.minWidth);
+    assert.equal(tiny.height, PANEL_BOUNDS.minHeight);
+
+    const huge = clampGeometry({ width: 99999, height: 99999 }, view);
+    assert.ok(huge.width <= view.width - 16);
+    assert.ok(huge.height <= view.height - 16);
+});
+
+await test('survives a tiny viewport and junk input without throwing', () => {
+    for (const [geometry, viewport] of [
+        [{}, { width: 200, height: 150 }],
+        [{ left: NaN, top: 'abc', width: null, height: undefined }, view],
+        [null, view],
+        [{ left: Infinity, top: -Infinity }, view],
+        [{}, {}],
+    ]) {
+        const g = clampGeometry(geometry, viewport);
+        for (const key of ['left', 'top', 'width', 'height']) {
+            assert.ok(Number.isFinite(g[key]), `${key} was ${g[key]}`);
+        }
+    }
+});
+
+console.log('\nCollapse and persistence');
+
+await test('collapsing toggles state and is written to settings', () => {
+    const { channel, settings } = makeChannel();
+    assert.equal(channel.collapsed, false);
+
+    channel.toggleCollapse();
+    assert.equal(channel.collapsed, true);
+    assert.equal(settings.oocPanel.collapsed, true, 'collapsed state was not persisted');
+
+    channel.toggleCollapse();
+    assert.equal(channel.collapsed, false);
+    assert.equal(settings.oocPanel.collapsed, false);
+});
+
+await test('reopening expands a panel that was closed while collapsed', () => {
+    const { channel, settings } = makeChannel({ panel: { collapsed: true } });
+    channel.collapsed = true;
+
+    channel.openPanel();
+    assert.equal(channel.collapsed, false, 'reopening should reveal the messages');
+    assert.equal(settings.oocPanel.collapsed, false);
+});
+
+await test('resetting restores the defaults and reopens', () => {
+    const { channel, settings } = makeChannel({ panel: { left: -9000, top: 8000, width: 12, collapsed: true } });
+    channel.collapsed = true;
+
+    const g = channel.resetPosition();
+    assert.equal(channel.collapsed, false);
+    assert.equal(g.width, PANEL_BOUNDS.defaultWidth);
+    assert.equal(g.height, PANEL_BOUNDS.defaultHeight);
+    assert.equal(settings.oocPanel.collapsed, false);
+    assert.ok(Number.isFinite(settings.oocPanel.left) && settings.oocPanel.left >= 0);
+});
+
+await test('close and open drive the state machine with no DOM present', () => {
+    const { channel } = makeChannel();
+    channel.openPanel();
+    assert.equal(channel.open, true);
+    channel.close();
+    assert.equal(channel.open, false);
+    channel.toggle();
+    assert.equal(channel.open, true);
+    channel.toggle();
+    assert.equal(channel.open, false);
+});
+
+await test('works without any settings store at all', () => {
+    // deps.settings is optional; the channel must not throw when it is absent.
+    const channel = new OOCChannel({
+        getContext: () => makeContext(),
+        send: () => {},
+        isConnected: () => true,
+        peerId: () => 'me',
+        toastr: { info() {}, success() {}, warning() {}, error() {} },
+    });
+    channel.toggleCollapse();
+    channel.resetPosition();
+    assert.deepEqual(channel.stored, {});
 });
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

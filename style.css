@@ -286,6 +286,21 @@
     pointer-events: none;
 }
 
+/*
+ * THE FIX THAT MATTERS.
+ *
+ * The panel is shown and hidden with the `hidden` attribute, but `display: flex`
+ * below is an author-origin ID rule, and author rules beat the browser's built-in
+ * `[hidden] { display: none }` regardless of specificity. Without this override
+ * `hidden` has no visual effect at all, so the close button appeared dead and the
+ * panel was visible before it had been opened.
+ *
+ * This selector is (1,1,0) against the (1,0,0) of the block below, so it wins.
+ */
+#stmp_ooc_panel[hidden] {
+    display: none;
+}
+
 #stmp_ooc_panel {
     position: fixed;
     right: 16px;
@@ -293,8 +308,13 @@
     z-index: 3000;
     display: flex;
     flex-direction: column;
+    /* Starting size only; JS restores the saved geometry as inline styles. */
     width: min(380px, calc(100vw - 32px));
     height: min(440px, 60vh);
+    min-width: 260px;
+    min-height: 200px;
+    max-width: calc(100vw - 16px);
+    max-height: calc(100vh - 16px);
     overflow: hidden;
     color: var(--SmartThemeBodyColor);
     background-color: var(--SmartThemeBlurTintColor, rgb(20 20 20 / 96%));
@@ -445,4 +465,71 @@
         width: auto;
         height: min(50vh, 380px);
     }
+}
+
+/* ── collapsed, resize handle, title-bar buttons ─────────────────────────── */
+
+/* Collapsed: only the title bar remains, so it can be parked out of the way. */
+#stmp_ooc_panel.stmp-ooc-collapsed {
+    height: auto !important;
+    min-height: 0;
+    resize: none;
+}
+
+#stmp_ooc_panel.stmp-ooc-collapsed .stmp-ooc-log,
+#stmp_ooc_panel.stmp-ooc-collapsed .stmp-ooc-typing,
+#stmp_ooc_panel.stmp-ooc-collapsed .stmp-ooc-compose,
+#stmp_ooc_panel.stmp-ooc-collapsed .stmp-ooc-resize {
+    display: none;
+}
+
+#stmp_ooc_panel.stmp-ooc-collapsed .stmp-ooc-header {
+    border-bottom: none;
+}
+
+#stmp_ooc_panel .stmp-ooc-btn {
+    flex-shrink: 0;
+    width: 22px;
+    padding: 3px 0;
+    text-align: center;
+    cursor: pointer;
+    border-radius: 4px;
+    opacity: 0.65;
+}
+
+#stmp_ooc_panel .stmp-ooc-btn:hover,
+#stmp_ooc_panel .stmp-ooc-btn:focus-visible {
+    opacity: 1;
+    background-color: var(--white20a, rgb(255 255 255 / 12%));
+    outline: none;
+}
+
+#stmp_ooc_panel .stmp-ooc-resize {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 16px;
+    height: 16px;
+    cursor: nwse-resize;
+    touch-action: none;
+    /* Two hairlines, the conventional resize-grip affordance. */
+    background:
+        linear-gradient(135deg, transparent 46%, var(--SmartThemeBorderColor) 46% 54%, transparent 54%),
+        linear-gradient(135deg, transparent 66%, var(--SmartThemeBorderColor) 66% 74%, transparent 74%);
+    opacity: 0.7;
+}
+
+#stmp_ooc_panel .stmp-ooc-resize:hover {
+    opacity: 1;
+}
+
+/* No transitions or text selection while a drag or resize is in flight. */
+#stmp_ooc_panel.stmp-ooc-dragging,
+#stmp_ooc_panel.stmp-ooc-resizing {
+    user-select: none;
+    transition: none;
+}
+
+#stmp_ooc_panel.stmp-ooc-dragging {
+    opacity: 0.92;
 }

@@ -196,10 +196,18 @@ then hand out a code built for the address people actually reach you on. Opening
 a port straight to the internet is not recommended, even with the handshake in
 front of it.
 
-**Player chat.** The speech-bubble icon next to the send button opens it, and
-carries an unread badge. Enter sends, Shift+Enter makes a new line. The panel is
-draggable. **To RP** posts the composed text into the roleplay without asking for
-a reply — that, and only that, crosses over.
+**Player chat.** The speech-bubble icon next to the send button opens and closes
+it, and carries an unread badge. Enter sends, Shift+Enter makes a new line.
+
+The panel can be dragged by its title bar, resized from the bottom-right grip,
+and collapsed to just the title bar with the **–** button or by double-clicking
+the title bar. Position, size and collapsed state are remembered between
+sessions, and are always clamped back into the viewport — so a panel saved on a
+large monitor never returns unreachable on a laptop. If it ends up somewhere
+awkward, **Reset its position** in the Multiplayer panel puts it back.
+
+**To RP** posts the composed text into the roleplay without asking for a reply —
+that, and only that, crosses over.
 
 Slash commands: `/mp-host`, `/mp-join <code>`, `/mp-leave`, `/mp-sync`,
 `/mp-status`, `/mp-ooc [message]` (opens the panel when given no text).
@@ -312,7 +320,16 @@ Four bugs came out of writing these, all fixed:
   that always announces itself.
 - The OOC panel's unread counter was cleared inside a DOM guard, so the state
   machine's behaviour depended on whether the panel happened to be mounted.
-  State is now updated before any DOM work.
+- The panel could not be closed at all. It is shown and hidden with the `hidden`
+  attribute, but `#stmp_ooc_panel { display: flex }` is an author-origin ID rule,
+  and author rules beat the browser's built-in `[hidden] { display: none }`
+  regardless of specificity — so `hidden` had no visual effect. The close button
+  looked dead and the panel was visible before it was ever opened. Fixed with an
+  explicit `#stmp_ooc_panel[hidden] { display: none }`.
+- Reopening a panel that had been collapsed left it collapsed, so clicking the
+  icon appeared to do nothing — the same "state behind a DOM guard" mistake as
+  above, made a second time. Every state change in `openPanel` now happens above
+  the guard, with a comment saying why.
 
 ---
 
