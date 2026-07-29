@@ -66,6 +66,10 @@
 }
 
 #stmp_settings .stmp-error {
+    /* Setup guidance is multi-line and includes commands to copy, so preserve
+       the line breaks and use a monospace-friendly wrap. */
+    white-space: pre-line;
+    overflow-wrap: anywhere;
     margin: 8px 0;
     padding: 8px 10px;
     border-left: 3px solid var(--warning, #c94f4f);

@@ -128,13 +128,23 @@ Joining a room needs nothing else. Only the host needs step 2.
 SillyTavern loads server plugins from its own `plugins/` directory, so the relay
 has to be linked there. From inside the extension folder:
 
+On Windows, double-click **`install-windows.bat`**. It finds Node even when it
+isn't on PATH — the SillyTavern Launcher bundles its own copy and doesn't always
+add it — then runs the installer and tells you what to do next.
+
+Anywhere else, or from a terminal:
+
 ```bash
 node install.mjs --enable
 ```
 
-That links `./server` to `SillyTavern/plugins/st-multiplayer`, checks that `ws`
-resolves, and sets `enableServerPlugins: true` in `config.yaml` (backing the
-file up first). Then restart SillyTavern.
+Either way it links `./server` to `SillyTavern/plugins/st-multiplayer`, checks
+that `ws` resolves, and sets `enableServerPlugins: true` in `config.yaml`
+(backing the file up first).
+
+**Then fully restart SillyTavern.** Reloading the browser page does nothing:
+`loadPlugins()` only runs while the server is starting, so the server process
+itself has to restart.
 
 ```bash
 node install.mjs                 # link only, just report on config.yaml
@@ -143,9 +153,25 @@ node install.mjs --copy          # copy instead of link (Windows, Docker images)
 node install.mjs --uninstall     # remove it again
 ```
 
-On startup you should see `Initializing plugin from …/plugins/st-multiplayer`
-in the SillyTavern console. If the Multiplayer panel says the server plugin is
-unavailable, that line is the first thing to check.
+On startup the SillyTavern console — the terminal window, not the browser one —
+should print `Initializing plugin from …/plugins/st-multiplayer`.
+
+### "The Multiplayer server plugin is not available: HTTP 404"
+
+404 means the route was never mounted, so the plugin was not loaded at all.
+Exactly three things cause it, in order of likelihood:
+
+1. **The installer was never run.** Nothing is in `SillyTavern/plugins/`.
+2. **`enableServerPlugins` is not `true`** in `config.yaml`. ST returns an empty
+   cleanup function and skips the whole plugins directory without logging
+   anything, so this failure is completely silent.
+3. **SillyTavern was not restarted** after the first two were fixed.
+
+Joining a room is unaffected by all of this — only hosting needs the relay.
+
+A different status means something else: **403** is a non-admin account, **401**
+means reload and sign in again, and a version-mismatch message means the relay
+on disk is older or newer than the extension, so re-run the installer.
 
 `ws` is one of SillyTavern's own dependencies from 1.13 onward, so there is
 normally nothing to install. On an older tree: `npm install ws` in the
