@@ -544,3 +544,16 @@
 
 #stmp_settings .stmp-ok  { color: #7fc47f; }
 #stmp_settings .stmp-bad { color: #e08585; }
+
+.stmp-picker .stmp-pick-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+}
+
+.stmp-picker .stmp-pick-toolbar .menu_button {
+    margin: 0;
+    padding: 2px 8px;
+    font-size: 0.8em;
+}

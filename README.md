@@ -344,6 +344,7 @@ node tests/ooc.test.mjs       # 25 checks — player chat cannot reach a prompt
 node tests/hunt.test.mjs      # 13 probes — adversarial; findings, not a gate
 node tests/portmap.test.mjs   # 16 checks — router protocols, parsing, SSRF guard
 node tests/sync.test.mjs      # 18 checks — extension sync actually installs things
+node tests/cards.test.mjs     # 19 checks — the card-sharing chain end to end
 ```
 
 `interop` matters because the key schedule and frame format are implemented
@@ -419,6 +420,12 @@ Seven bugs came out of writing these, all fixed:
 - Port-mapping discovery originally probed each candidate gateway in sequence, so
   hosting blocked for four and a half seconds before a code appeared. Candidates
   and protocols are now raced under a 2.6-second ceiling.
+- **Sharing characters shared nothing, and said so.** The picker read its
+  checkboxes after `callGenericPopup` resolved, but SillyTavern removes the
+  dialog from the DOM before `show()` settles — so the query matched nothing, the
+  selection was always empty, and the panel honestly reported "Sharing 0
+  characters". Selection is now captured both by a delegated change listener and
+  by an `onClosing` handler that reads the popup while its DOM still exists.
 - **Extension sync installed nothing at all, silently.** The parity report
   stripped `homePage`, and `remoteUrl` was only populated in the non-default
   `commit` strictness mode — so `buildSyncPlan` had no URL for anything, every
