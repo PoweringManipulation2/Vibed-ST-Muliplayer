@@ -40,6 +40,13 @@ const DEFAULT_SETTINGS = Object.freeze({
      */
     bindLan: true,
     roomName: 'SillyTavern room',
+    /**
+     * What address goes into the connection code. Blank means "use the LAN
+     * address the relay detected", which is correct for same-network play and
+     * useless for anything else. Set this to a public hostname, a public IP, or
+     * a tunnel address when players are not on your network.
+     */
+    advertiseHost: '',
     maxPeers: 4,
     /** Refuse peers whose extension set differs from the host's. */
     requireParity: true,

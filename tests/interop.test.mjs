@@ -59,6 +59,50 @@ await test('opcode tables and limits match', () => {
     assert.deepEqual({ ...browserProto.LIMITS }, { ...nodeProto.LIMITS });
 });
 
+console.log('\nAddress classification');
+
+await test('recognises local-network addresses', () => {
+    // These are the codes that produce "stuck on connecting" for a remote friend.
+    for (const host of [
+        '192.168.1.50', '192.168.0.1', '10.0.0.7', '10.255.255.254',
+        '172.16.0.1', '172.31.255.255', '127.0.0.1', 'localhost',
+        '169.254.10.1', '100.64.0.1', 'tavern.local', '::1',
+    ]) {
+        assert.equal(browserProto.isPrivateAddress(host), true, `${host} should be private`);
+    }
+});
+
+await test('recognises routable addresses', () => {
+    for (const host of [
+        '8.8.8.8', '1.1.1.1', '203.0.113.5', '172.32.0.1', '172.15.0.1',
+        '192.169.0.1', '11.0.0.1', 'tavern.example.net', 'my-host.duckdns.org',
+    ]) {
+        assert.equal(browserProto.isPrivateAddress(host), false, `${host} should be routable`);
+    }
+});
+
+await test('does not misjudge the 172.16/12 boundaries', () => {
+    assert.equal(browserProto.isPrivateAddress('172.15.255.255'), false);
+    assert.equal(browserProto.isPrivateAddress('172.16.0.0'), true);
+    assert.equal(browserProto.isPrivateAddress('172.31.255.255'), true);
+    assert.equal(browserProto.isPrivateAddress('172.32.0.0'), false);
+});
+
+await test('handles empty and junk input', () => {
+    for (const host of ['', null, undefined, '   ', 'not an address', '999.999.999.999']) {
+        assert.equal(typeof browserProto.isPrivateAddress(host), 'boolean');
+    }
+    assert.equal(browserProto.isPrivateAddress(''), false);
+});
+
+await test('a code carrying a public address survives the round trip', () => {
+    const psk = browser.randomBytes(browserProto.PSK_LENGTH);
+    const code = browserProto.encodeConnectionCode({ host: 'tavern.example.net', port: 8899, psk });
+    const decoded = browserProto.decodeConnectionCode(code);
+    assert.equal(decoded.host, 'tavern.example.net');
+    assert.equal(browserProto.isPrivateAddress(decoded.host), false);
+});
+
 console.log('\nExtension folder derivation');
 
 await test('recovers a renamed folder from the module URL', () => {

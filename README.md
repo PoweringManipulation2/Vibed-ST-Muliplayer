@@ -189,12 +189,35 @@ to whoever is joining. *Choose shared characters* picks what the room can see.
 check fails you'll get a diff and the sync option; after syncing, reload and
 rejoin.
 
-**Reaching the host.** Same network: leave *Allow players on my local network*
-on and share the code as-is. Over the internet: turn that option off and forward
-or tunnel the port yourself (Tailscale, WireGuard, `ssh -L`, Cloudflare Tunnel),
-then hand out a code built for the address people actually reach you on. Opening
-a port straight to the internet is not recommended, even with the handshake in
-front of it.
+**Reaching the host.** This is where most failures come from, so it is worth
+getting right before anyone tries to join.
+
+*Everyone on the same Wi-Fi or LAN:* leave **Address players connect to** blank.
+The relay detects your local address and puts it in the code.
+
+*Anyone not on your network:* the detected local address — `192.168.x.x`,
+`10.x.x.x` and friends — cannot route to them, and their client will sit on
+"Connecting" until it gives up. Put a reachable address in **Address players
+connect to** before you start hosting: a public IP, a hostname, or a tunnel
+address. The port has to be forwarded or tunnelled to match. Tailscale,
+WireGuard, `ssh -L` and Cloudflare Tunnel all work; exposing the port raw to the
+internet is not recommended even with the handshake in front of it.
+
+### "Stuck on Connecting" forever
+
+The client reports this after three failed attempts with a checklist, because
+nothing answering at all is a network problem rather than a wrong-code or
+wrong-version problem. In rough order of likelihood:
+
+1. **The code contains a local address and the joiner is elsewhere.** See above.
+   The host's activity log warns about this when it happens.
+2. **A firewall is blocking the port.** On Windows, Defender blocks incoming
+   connections to `node.exe` silently — no prompt, no log entry, nothing.
+3. **The host stopped hosting**, or rotated the code after sharing it.
+4. **The port is not forwarded** to the host machine.
+5. **The joiner's SillyTavern is served over HTTPS.** Browsers refuse plain
+   WebSocket connections from an HTTPS page, so this is refused up front with an
+   explanation rather than hanging.
 
 **Player chat.** The speech-bubble icon next to the send button opens and closes
 it, and carries an unread badge. Enter sends, Shift+Enter makes a new line.

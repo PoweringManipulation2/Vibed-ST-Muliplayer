@@ -27,6 +27,12 @@
                     <label for="stmp_port">Port</label>
                     <input id="stmp_port" class="text_pole" type="number" min="1024" max="65535" step="1">
 
+                    <label for="stmp_advertise_host" title="The address that gets written into the connection code">
+                        Address players connect to
+                    </label>
+                    <input id="stmp_advertise_host" class="text_pole" type="text" autocomplete="off"
+                           placeholder="leave blank for same-network play">
+
                     <label for="stmp_max_peers">Max players</label>
                     <input id="stmp_max_peers" class="text_pole" type="number" min="2" max="8" step="1">
 
@@ -43,6 +49,12 @@
                         <small class="stmp-muted">Off = loopback only, useful when tunnelling the port yourself.</small>
                     </span>
                 </label>
+
+                <div class="stmp-muted stmp-note">
+                    Leave the address blank if everyone is on your Wi-Fi or LAN. If they are not, the
+                    detected local address cannot reach them — put your public IP, hostname, or tunnel
+                    address here instead, and make sure the port is forwarded or tunnelled.
+                </div>
 
                 <label class="checkbox_label" for="stmp_require_parity">
                     <input id="stmp_require_parity" type="checkbox">
