@@ -583,3 +583,53 @@
     margin: 0;
     line-height: 1.6;
 }
+
+/* ── shared session panel ────────────────────────────────────────────────── */
+
+#stmp_settings .stmp-session-state {
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 0.9em;
+    background-color: var(--black30a);
+    border-left: 2px solid var(--SmartThemeBorderColor);
+}
+
+#stmp_settings .stmp-session-live {
+    border-left-color: #4caf50;
+}
+
+#stmp_settings .stmp-session-elsewhere {
+    border-left-color: #e0a52a;
+}
+
+#stmp_settings .stmp-session-cards {
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+#stmp_settings .stmp-session-cards li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+#stmp_settings .stmp-session-cards li.stmp-session-active {
+    font-weight: 600;
+}
+
+#stmp_settings .stmp-session-cards li.stmp-session-active > i {
+    color: #4caf50;
+}
+
+#stmp_settings .stmp-session-cards > li > i {
+    font-size: 0.6em;
+    opacity: 0.6;
+}
+
+#stmp_settings .stmp-open-session {
+    margin: 0;
+    padding: 1px 9px;
+    font-size: 0.8em;
+}

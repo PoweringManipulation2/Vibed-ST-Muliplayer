@@ -20,7 +20,8 @@ import os from 'node:os';
 import {
     CLIENT_ALLOWED_OPS,
     ECHO_TO_SENDER,
-    OOC, HS, LIMITS, OP, PROTOCOL_REVISION, REJECT_REASON, ROLE,
+    OOC,
+    STAMP_IDENTITY, HS, LIMITS, OP, PROTOCOL_REVISION, REJECT_REASON, ROLE,
     PSK_LENGTH, HANDSHAKE_NONCE_LENGTH, ROOM_ID_LENGTH, TO_HOST_ONLY,
 } from './protocol.js';
 import { PortMapper, isPrivateIPv4 } from './portmap.js';
@@ -138,6 +139,17 @@ export class Relay {
          * @type {object[]}
          */
         this.oocHistory = [];
+
+        /**
+         * Last persona published by each peer, keyed by peer id.
+         *
+         * Held by the relay so a peer joining later learns who everyone is
+         * playing. Personas were previously broadcast once at admission, which
+         * meant the host's persona was announced before anyone was there to hear
+         * it and no newcomer ever saw it.
+         * @type {Map<string, object>}
+         */
+        this.personas = new Map();
 
         /**
          * Asks the router to open the port so players elsewhere can reach us
@@ -275,6 +287,7 @@ export class Relay {
         this.host = null;
         this.hostReport = null;
         this.oocHistory = [];
+        this.personas.clear();
 
         // `close()` only fires once every connection is gone, and WebSocket
         // connections are long-lived. Terminating the sockets first means the
@@ -715,10 +728,19 @@ export class Relay {
             return this.#broadcast({ op: OP.OOC_TYPING, from: peer.id, name: peer.name }, { except: peer.id });
         }
 
+        if (op === OP.PERSONA_STATE) return this.#onPersona(peer, payload);
+
         if (peer.role === ROLE.HOST) {
+            // Host frames were forwarded verbatim, so anything identity-bearing
+            // arrived anonymous. The roster keys personas by peer id, so the
+            // host's own persona could never be matched to the host and clients
+            // saw no profile for them at all.
+            const outgoing = STAMP_IDENTITY.has(op)
+                ? { ...payload, from: peer.id, name: peer.name }
+                : payload;
             const target = payload.to ? this.peers.get(payload.to) : null;
-            if (target) return this.#send(target, payload);
-            return this.#broadcast(payload, { except: peer.id });
+            if (target) return this.#send(target, outgoing);
+            return this.#broadcast(outgoing, { except: peer.id });
         }
 
         if (TO_HOST_ONLY.has(op)) {
@@ -727,6 +749,26 @@ export class Relay {
         }
 
         return this.#broadcast({ ...payload, from: peer.id }, { except: peer.id });
+    }
+
+    /**
+     * Relays one persona to the room and remembers it.
+     * The relay stamps the author, so a peer cannot publish a persona as somebody
+     * else, and echoes to everyone including the sender so ordering is uniform.
+     */
+    async #onPersona(peer, payload) {
+        const persona = payload?.persona;
+        if (!persona || typeof persona !== 'object') return;
+
+        const stamped = {
+            op: OP.PERSONA_STATE,
+            from: peer.id,
+            name: peer.name,
+            role: peer.role,
+            persona,
+        };
+        this.personas.set(peer.id, stamped);
+        return this.#broadcast(stamped, {});
     }
 
     // =======================================================================
@@ -850,6 +892,13 @@ export class Relay {
             await this.#send(peer, { op: OP.OOC_HISTORY, messages: this.oocHistory });
         }
 
+        // Tell the newcomer who everyone is playing, and ask the room to
+        // re-publish so the newcomer's own persona reaches everyone else.
+        for (const [peerId, stamped] of this.personas) {
+            if (peerId === peer.id) continue;
+            await this.#send(peer, stamped);
+        }
+
         // Bring the newcomer up to date with whatever the host is sharing.
         if (this.host && peer.role !== ROLE.HOST) {
             await this.#send(this.host, { op: OP.CARDS_WANT, want: 'republish', from: peer.id });
@@ -902,6 +951,9 @@ export class Relay {
         const peer = this.peers.get(peerId);
         if (!peer) return;
         this.peers.delete(peerId);
+        // Drop the cached persona too, or a departed player keeps appearing in
+        // everyone's roster with a profile that can no longer be refreshed.
+        this.personas.delete(peerId);
 
         if (this.host?.id === peerId) {
             this.host = null;

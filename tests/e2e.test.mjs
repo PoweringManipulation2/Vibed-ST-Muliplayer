@@ -501,6 +501,78 @@ await test('rotating the code invalidates the old one', async () => {
     await shutdown(room.relay, room.host, guest.client, stale);
 });
 
+console.log('\nPersonas');
+
+await test('the host persona reaches clients, stamped with the host peer id', async () => {
+    // Regression: host frames were forwarded verbatim, so an identity-bearing
+    // payload arrived anonymous and the roster could never match it to the host.
+    const room = await bootRoom();
+    const guest = await joinClient({ ...room, name: 'Guest' });
+    await guest.seen.waitForOp(OP.PARITY_RESULT);
+
+    room.host.send({ op: OP.PERSONA_STATE, persona: { name: 'Riley', description: 'A weary captain.' } });
+    const received = await guest.seen.waitForOp(OP.PERSONA_STATE);
+
+    assert.equal(received.persona.name, 'Riley');
+    assert.equal(received.role, 'host');
+    assert.ok(received.from, 'the relay must stamp the originating peer id');
+    assert.equal(received.name, 'TheHost', 'the relay must stamp the player name');
+
+    await shutdown(room.relay, room.host, guest.client);
+});
+
+await test('a peer joining later is told who everyone is playing', async () => {
+    const room = await bootRoom();
+    const first = await joinClient({ ...room, name: 'First' });
+    await first.seen.waitForOp(OP.PARITY_RESULT);
+
+    room.host.send({ op: OP.PERSONA_STATE, persona: { name: 'Riley' } });
+    first.client.send({ op: OP.PERSONA_STATE, persona: { name: 'Casey' } });
+    await first.seen.waitForOp(OP.PERSONA_STATE);
+    await new Promise(resolve => setTimeout(resolve, 250));
+
+    const late = await joinClient({ ...room, name: 'Late' });
+    await late.seen.waitForOp(OP.PARITY_RESULT);
+    await new Promise(resolve => setTimeout(resolve, 400));
+
+    const names = late.seen.filter(p => p?.op === OP.PERSONA_STATE).map(p => p.persona.name).sort();
+    assert.deepEqual(names, ['Casey', 'Riley'], `late joiner saw ${JSON.stringify(names)}`);
+
+    await shutdown(room.relay, room.host, first.client, late.client);
+});
+
+await test('a peer cannot publish a persona as somebody else', async () => {
+    const room = await bootRoom();
+    const a = await joinClient({ ...room, name: 'PlayerA' });
+    const b = await joinClient({ ...room, name: 'PlayerB' });
+    await a.seen.waitForOp(OP.PARITY_RESULT);
+    await b.seen.waitForOp(OP.PARITY_RESULT);
+
+    a.client.send({ op: OP.PERSONA_STATE, persona: { name: 'Fake' }, from: 'someone-else', role: 'host' });
+    const received = await b.seen.waitForOp(OP.PERSONA_STATE);
+
+    assert.equal(received.name, 'PlayerA', 'the relay must ignore a client-supplied identity');
+    assert.equal(received.role, 'client');
+
+    await shutdown(room.relay, room.host, a.client, b.client);
+});
+
+await test('a departed player stops appearing in the persona cache', async () => {
+    const room = await bootRoom();
+    const guest = await joinClient({ ...room, name: 'Leaver' });
+    await guest.seen.waitForOp(OP.PARITY_RESULT);
+
+    guest.client.send({ op: OP.PERSONA_STATE, persona: { name: 'Casey' } });
+    await new Promise(resolve => setTimeout(resolve, 250));
+    assert.equal(room.relay.personas.size, 1);
+
+    guest.client.close('leaving');
+    await new Promise(resolve => setTimeout(resolve, 400));
+    assert.equal(room.relay.personas.size, 0, 'a departed peer stayed in the persona cache');
+
+    await shutdown(room.relay, room.host);
+});
+
 console.log('\nOut-of-character channel');
 
 await test('an OOC message reaches every peer, sender included', async () => {

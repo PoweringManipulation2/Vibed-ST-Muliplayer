@@ -339,7 +339,7 @@ not as protection against a determined attacker.
 
 ```bash
 node tests/interop.test.mjs   # 52 checks — browser and Node crypto agree
-node tests/e2e.test.mjs       # 32 checks — real relay, real sockets
+node tests/e2e.test.mjs       # 36 checks — real relay, real sockets
 node tests/ooc.test.mjs       # 25 checks — player chat cannot reach a prompt
 node tests/hunt.test.mjs      # 13 probes — adversarial; findings, not a gate
 node tests/portmap.test.mjs   # 16 checks — router protocols, parsing, SSRF guard
@@ -421,6 +421,23 @@ Seven bugs came out of writing these, all fixed:
 - Port-mapping discovery originally probed each candidate gateway in sequence, so
   hosting blocked for four and a half seconds before a code appeared. Candidates
   and protocols are now raced under a 2.6-second ceiling.
+- **Clients could never see the host's persona.** The relay forwarded host frames
+  verbatim, so identity-bearing payloads arrived anonymous. The roster keys
+  personas by peer id, so the host's own persona could not be matched to the host
+  and no profile appeared for them. Host frames are now stamped, and the relay
+  caches personas so a peer joining later learns who everyone is playing rather
+  than having missed the announcement.
+- **The host had no way to see or enter a shared session.** It existed only as
+  internal state that followed whatever chat happened to be open, with nothing
+  indicating what was shared or how to get there. There is now a Shared session
+  panel listing every shared character, marking the live one, and opening it in
+  one click.
+- **Shared card fields stayed empty even after hydration.** Two causes. A
+  definition could arrive before `getCharacters()` had refreshed, so the lookup
+  found nothing and the hydration was dropped on the floor — definitions are now
+  parked and retried. And hydration mutates the in-memory character, which is
+  enough for prompt building but not for the editor fields, which were filled from
+  the object when the card was selected; the panel is now repainted.
 - **Chat leaked into unrelated chats.** The bridge relayed whatever chat happened
   to be open and wrote inbound messages into whatever chat the receiver had open,
   so a hosted character's greeting could land in the assistant chat that opens on
