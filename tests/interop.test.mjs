@@ -63,10 +63,13 @@ console.log('\nAddress classification');
 
 await test('recognises local-network addresses', () => {
     // These are the codes that produce "stuck on connecting" for a remote friend.
+    // 100.64.0.0/10 is deliberately absent: it is carrier-grade NAT space and
+    // also Tailscale's range, which does reach across the internet. See the
+    // tailnet test below.
     for (const host of [
         '192.168.1.50', '192.168.0.1', '10.0.0.7', '10.255.255.254',
         '172.16.0.1', '172.31.255.255', '127.0.0.1', 'localhost',
-        '169.254.10.1', '100.64.0.1', 'tavern.local', '::1',
+        '169.254.10.1', 'tavern.local', '::1',
     ]) {
         assert.equal(browserProto.isPrivateAddress(host), true, `${host} should be private`);
     }
@@ -76,6 +79,7 @@ await test('recognises routable addresses', () => {
     for (const host of [
         '8.8.8.8', '1.1.1.1', '203.0.113.5', '172.32.0.1', '172.15.0.1',
         '192.169.0.1', '11.0.0.1', 'tavern.example.net', 'my-host.duckdns.org',
+        '100.101.102.103', // Tailscale: routable between tailnet members
     ]) {
         assert.equal(browserProto.isPrivateAddress(host), false, `${host} should be routable`);
     }
@@ -101,6 +105,82 @@ await test('a code carrying a public address survives the round trip', () => {
     const decoded = browserProto.decodeConnectionCode(code);
     assert.equal(decoded.host, 'tavern.example.net');
     assert.equal(browserProto.isPrivateAddress(decoded.host), false);
+});
+
+console.log('\nTLS endpoints and default ports');
+
+await test('a wss code round-trips with no port (scheme default)', () => {
+    // This is the Cloudflare Tunnel / reverse-proxy shape: hostname on 443.
+    const psk = browser.randomBytes(browserProto.PSK_LENGTH);
+    const code = browserProto.encodeConnectionCode({ host: 'shy-fog-1234.trycloudflare.com', port: 0, psk, secure: true });
+    const d = browserProto.decodeConnectionCode(code);
+    assert.equal(d.host, 'shy-fog-1234.trycloudflare.com');
+    assert.equal(d.port, 0);
+    assert.equal(d.secure, true);
+    assert.equal(browserProto.connectionUrl(d), 'wss://shy-fog-1234.trycloudflare.com/');
+});
+
+await test('a wss code with an explicit port keeps it', () => {
+    const psk = browser.randomBytes(browserProto.PSK_LENGTH);
+    const d = browserProto.decodeConnectionCode(
+        browserProto.encodeConnectionCode({ host: 'tavern.example.net', port: 8443, psk, secure: true }));
+    assert.equal(browserProto.connectionUrl(d), 'wss://tavern.example.net:8443/');
+});
+
+await test('plain codes still decode as plain, and IPv4 TLS works too', () => {
+    const psk = browser.randomBytes(browserProto.PSK_LENGTH);
+    const plain = browserProto.decodeConnectionCode(
+        browserProto.encodeConnectionCode({ host: '100.101.102.103', port: 8899, psk }));
+    assert.equal(plain.secure, false);
+    assert.equal(browserProto.connectionUrl(plain), 'ws://100.101.102.103:8899/');
+
+    const tls = browserProto.decodeConnectionCode(
+        browserProto.encodeConnectionCode({ host: '203.0.113.9', port: 443, psk, secure: true }));
+    assert.equal(tls.secure, true);
+    assert.equal(browserProto.connectionUrl(tls), 'wss://203.0.113.9:443/');
+});
+
+await test('the psk survives every address kind intact', () => {
+    const psk = browser.randomBytes(browserProto.PSK_LENGTH);
+    for (const params of [
+        { host: '10.0.0.1', port: 8899, psk },
+        { host: '10.0.0.1', port: 0, psk, secure: true },
+        { host: 'a.example.com', port: 1234, psk },
+        { host: 'a.example.com', port: 0, psk, secure: true },
+    ]) {
+        const d = browserProto.decodeConnectionCode(browserProto.encodeConnectionCode(params));
+        assert.deepEqual([...d.psk], [...psk], JSON.stringify({ ...params, psk: undefined }));
+    }
+});
+
+await test('a rejected port is caught rather than silently wrapped', () => {
+    const psk = browser.randomBytes(browserProto.PSK_LENGTH);
+    assert.throws(() => browserProto.encodeConnectionCode({ host: '10.0.0.1', port: 70000, psk }), /out of range/);
+});
+
+console.log('\nAddress classification for advice');
+
+await test('Tailscale space is a tailnet, not a LAN', () => {
+    // Warning "same local network only" here would be wrong: a tailnet spans
+    // the internet, and it is the recommended way to play across houses.
+    for (const host of ['100.64.0.1', '100.101.102.103', '100.127.255.255']) {
+        assert.equal(browserProto.classifyAddress(host), 'tailnet');
+        assert.equal(browserProto.isPrivateAddress(host), false, `${host} must not be flagged same-network-only`);
+    }
+});
+
+await test('classifies the other kinds correctly', () => {
+    const cases = {
+        '127.0.0.1': 'loopback', 'localhost': 'loopback', '::1': 'loopback',
+        '192.168.1.5': 'lan', '10.0.0.7': 'lan', '172.20.1.1': 'lan', '169.254.1.1': 'lan',
+        'tavern.local': 'lan',
+        '8.8.8.8': 'public', '203.0.113.5': 'public', '172.32.0.1': 'public',
+        'x.trycloudflare.com': 'hostname',
+        '': 'unknown', '999.1.1.1': 'unknown',
+    };
+    for (const [host, expected] of Object.entries(cases)) {
+        assert.equal(browserProto.classifyAddress(host), expected, `${host} should be ${expected}`);
+    }
 });
 
 console.log('\nExtension folder derivation');

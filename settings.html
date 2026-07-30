@@ -33,6 +33,12 @@
                     <input id="stmp_advertise_host" class="text_pole" type="text" autocomplete="off"
                            placeholder="leave blank for same-network play">
 
+                    <label for="stmp_advertise_port" title="Only if the public port differs from the listen port">
+                        Public port
+                    </label>
+                    <input id="stmp_advertise_port" class="text_pole" type="number" min="0" max="65535" step="1"
+                           placeholder="0 = same as the port above">
+
                     <label for="stmp_max_peers">Max players</label>
                     <input id="stmp_max_peers" class="text_pole" type="number" min="2" max="8" step="1">
 
@@ -50,10 +56,33 @@
                     </span>
                 </label>
 
+                <label class="checkbox_label" for="stmp_auto_forward">
+                    <input id="stmp_auto_forward" type="checkbox">
+                    <span>Ask my router to open the port automatically
+                        <small class="stmp-muted">Uses NAT-PMP or UPnP, which most home routers have on by
+                        default. If it works, players anywhere can join and there is nothing to configure.</small>
+                    </span>
+                </label>
+
+                <label class="checkbox_label" for="stmp_advertise_secure">
+                    <input id="stmp_advertise_secure" type="checkbox">
+                    <span>That address is behind an HTTPS tunnel or proxy
+                        <small class="stmp-muted">Issues a <code>wss://</code> code. Tick this for Cloudflare Tunnel,
+                        ngrok, or your own reverse proxy; leave it off for Tailscale and port forwarding.</small>
+                    </span>
+                </label>
+
                 <div class="stmp-muted stmp-note">
-                    Leave the address blank if everyone is on your Wi-Fi or LAN. If they are not, the
-                    detected local address cannot reach them — put your public IP, hostname, or tunnel
-                    address here instead, and make sure the port is forwarded or tunnelled.
+                    <b>Playing with someone on another network?</b> Leave the address blank only if everyone is
+                    on your own Wi-Fi. Otherwise the detected local address cannot reach them.
+                    <br><br>
+                    <b>Easiest option:</b> install <b>Tailscale</b> on both machines, join the same tailnet, and
+                    put your <code>100.x.y.z</code> Tailscale address here. No port forwarding, works through
+                    almost any router, and leaves nothing exposed to the internet.
+                    <br><br>
+                    Port forwarding also works if you would rather: put your public IP here and forward the
+                    port. A Cloudflare Tunnel or reverse proxy works too — tick the HTTPS box for those and
+                    set the public port to 0 if it is on 443.
                 </div>
 
                 <label class="checkbox_label" for="stmp_require_parity">

@@ -23,6 +23,7 @@ import {
     OOC, HS, LIMITS, OP, PROTOCOL_REVISION, REJECT_REASON, ROLE,
     PSK_LENGTH, HANDSHAKE_NONCE_LENGTH, ROOM_ID_LENGTH, TO_HOST_ONLY,
 } from './protocol.js';
+import { PortMapper, isPrivateIPv4 } from './portmap.js';
 import {
     ReplayWindow, TokenBucket, computeConfirmation, confirmationLabels,
     createEphemeralKeyPair, deriveRoomId, deriveSessionKeys, openFrame,
@@ -138,6 +139,14 @@ export class Relay {
          */
         this.oocHistory = [];
 
+        /**
+         * Asks the router to open the port so players elsewhere can reach us
+         * without anyone editing router settings or installing a VPN.
+         */
+        this.portMapper = new PortMapper({ log: (...args) => this.log(...args) });
+        /** @type {null | {ok: boolean, method?: string, externalIp?: string|null, reason?: string, cgnat?: boolean}} */
+        this.portMapping = null;
+
         /** Sockets that have connected but not finished the handshake. */
         this.pending = new Set();
         /** ip -> {failures, blockedUntil} */
@@ -217,6 +226,24 @@ export class Relay {
         // Keep the process able to exit even with the relay running.
         this.httpServer.unref?.();
 
+        // Ask the router for a mapping only once the socket is actually
+        // listening, so a hole is never opened for a port nothing is serving.
+        if (options.autoMap !== false && this.bindLan) {
+            this.portMapping = await this.portMapper.open(this.port).catch(error => ({
+                ok: false, reason: error?.message ?? 'port mapping failed',
+            }));
+            if (this.portMapping.ok) {
+                this.log('info', `Router opened port ${this.port} via ${this.portMapping.method}`
+                    + (this.portMapping.externalIp ? ` - public address ${this.portMapping.externalIp}` : ''));
+            } else {
+                this.log('info', `Automatic port mapping unavailable: ${this.portMapping.reason}`);
+            }
+        } else {
+            this.portMapping = options.autoMap === false
+                ? { ok: false, reason: 'disabled in settings' }
+                : { ok: false, reason: 'the relay is bound to loopback, so there is nothing to map' };
+        }
+
         this.running = true;
         this.startedAt = Date.now();
         this._sweeper = setInterval(() => this.sweep(), 5000);
@@ -230,6 +257,10 @@ export class Relay {
         if (!this.running) return;
         this.running = false;
         clearInterval(this._sweeper);
+
+        // Close the hole in the router before releasing the port.
+        await this.portMapper.close().catch(() => {});
+        this.portMapping = null;
 
         for (const peer of this.peers.values()) {
             this.#sendJson(peer.socket, { t: HS.REJECT, reason: REJECT_REASON.SERVER_CLOSING });
@@ -325,6 +356,16 @@ export class Relay {
             addresses: this.bindLan
                 ? addresses.map(address => `${address}:${this.port}`)
                 : [`127.0.0.1:${this.port} (loopback only)`],
+            portMapping: this.portMapping,
+            /**
+             * The address most likely to work for everyone. A router-confirmed
+             * public IP beats the detected LAN address, which is useless to
+             * anyone outside the building. This is what removes the setup step.
+             */
+            publicHost: this.portMapping?.ok && this.portMapping.externalIp
+                && !isPrivateIPv4(this.portMapping.externalIp)
+                ? this.portMapping.externalIp
+                : null,
             roomName: this.roomName,
             requireParity: this.requireParity,
             parityStrictness: this.parityStrictness,
@@ -339,6 +380,16 @@ export class Relay {
             bindLan: this.bindLan,
             /** What the socket is actually bound to, as opposed to what is advertised. */
             boundTo: this.bindLan ? '0.0.0.0' : '127.0.0.1',
+            portMapping: this.portMapping,
+            /**
+             * The address most likely to work for everyone. A router-confirmed
+             * public IP beats a LAN address, which is useless to anyone who is
+             * not in the building.
+             */
+            publicHost: this.portMapping?.ok && this.portMapping.externalIp
+                && !isPrivateIPv4(this.portMapping.externalIp)
+                ? this.portMapping.externalIp
+                : null,
             uptimeMs: this.running ? Date.now() - this.startedAt : 0,
             maxPeers: this.maxPeers,
             requireParity: this.requireParity,

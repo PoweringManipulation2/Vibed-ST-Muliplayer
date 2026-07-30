@@ -111,6 +111,7 @@ export async function init(router) {
                 return relay.start({
                     port: body.port,
                     bindLan: body.bindLan,
+                    autoMap: body.autoMap,
                     roomName: body.roomName,
                     maxPeers: body.maxPeers,
                     requireParity: body.requireParity,

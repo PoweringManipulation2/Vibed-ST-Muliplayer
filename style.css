@@ -541,3 +541,6 @@
     border-radius: 4px;
     line-height: 1.45;
 }
+
+#stmp_settings .stmp-ok  { color: #7fc47f; }
+#stmp_settings .stmp-bad { color: #e08585; }

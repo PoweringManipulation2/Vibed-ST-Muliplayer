@@ -47,6 +47,16 @@ const DEFAULT_SETTINGS = Object.freeze({
      * a tunnel address when players are not on your network.
      */
     advertiseHost: '',
+    /**
+     * Ask the router to open the port on our behalf, via NAT-PMP or UPnP. On by
+     * default because it is what turns cross-network play into no setup at all;
+     * turn it off if you would rather manage router rules yourself.
+     */
+    autoPortForward: true,
+    /** Public port players reach, if it differs from the listen port. 0 = same. */
+    advertisePort: 0,
+    /** True when the address above is fronted by an HTTPS tunnel or proxy (wss). */
+    advertiseSecure: false,
     maxPeers: 4,
     /** Refuse peers whose extension set differs from the host's. */
     requireParity: true,

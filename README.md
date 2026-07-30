@@ -189,19 +189,45 @@ to whoever is joining. *Choose shared characters* picks what the room can see.
 check fails you'll get a diff and the sync option; after syncing, reload and
 rejoin.
 
-**Reaching the host.** This is where most failures come from, so it is worth
-getting right before anyone tries to join.
+**Reaching the host.** Leave **Ask my router to open the port automatically**
+ticked and, in most cases, there is nothing else to do.
 
-*Everyone on the same Wi-Fi or LAN:* leave **Address players connect to** blank.
-The relay detects your local address and puts it in the code.
+That option asks the router directly, over NAT-PMP and UPnP — the two protocols
+consumer routers have implemented for decades, usually enabled out of the box.
+If it works, the relay learns the public address from the router and puts it
+straight into the connection code, so a code generated on your Wi-Fi works for
+someone in another state with no port forwarding, no account, and nothing
+installed. Both protocols are implemented here with Node builtins only: no
+dependency, and no third-party service in the path.
 
-*Anyone not on your network:* the detected local address — `192.168.x.x`,
-`10.x.x.x` and friends — cannot route to them, and their client will sit on
-"Connecting" until it gives up. Put a reachable address in **Address players
-connect to** before you start hosting: a public IP, a hostname, or a tunnel
-address. The port has to be forwarded or tunnelled to match. Tailscale,
-WireGuard, `ssh -L` and Cloudflare Tunnel all work; exposing the port raw to the
-internet is not recommended even with the handshake in front of it.
+The mapping is a one-hour lease that renews itself and is removed when hosting
+stops. If SillyTavern is killed without a clean exit, the hole closes on its own
+within the hour rather than staying open.
+
+When it does not work, the panel says why rather than leaving you guessing:
+
+- **The router did not respond.** Automatic mapping is switched off in its
+  settings, or there is a second router between you and the internet.
+- **Carrier-grade NAT.** The router reports its own "public" address as a private
+  one, which means the ISP is sharing it between customers. No protocol can open
+  a port through that.
+
+For either case, use one of these instead and put the address in **Address
+players connect to**:
+
+- **Tailscale** (or WireGuard, ZeroTier) — install on both machines, sign in to
+  the same account, use your `100.x.y.z` address. Works through CGNAT and exposes
+  nothing to the internet.
+- **Manual port forwarding** — forward the port on your router, use your public
+  IP.
+- **An HTTPS tunnel or reverse proxy** — Cloudflare Tunnel, ngrok, or your own
+  nginx. Put the public hostname in, **tick the HTTPS box**, leave the public
+  port at 0 if it is on 443. This is also the only option that works when a
+  player's own SillyTavern is served over HTTPS, since browsers refuse plain
+  WebSockets from an HTTPS page.
+
+The panel shows the exact URL players will dial next to the code, so a wrong
+address or a forgotten HTTPS tick is visible before anyone tries to join.
 
 ### "Stuck on Connecting" forever
 
@@ -209,8 +235,10 @@ The client reports this after three failed attempts with a checklist, because
 nothing answering at all is a network problem rather than a wrong-code or
 wrong-version problem. In rough order of likelihood:
 
-1. **The code contains a local address and the joiner is elsewhere.** See above.
-   The host's activity log warns about this when it happens.
+1. **The code contains a local address and the joiner is elsewhere.** A
+   `192.168.x.x` or `10.x.x.x` address cannot route to another house. Use
+   Tailscale or one of the other options above. The host's activity log warns
+   about this when it happens.
 2. **A firewall is blocking the port.** On Windows, Defender blocks incoming
    connections to `node.exe` silently — no prompt, no log entry, nothing.
 3. **The host stopped hosting**, or rotated the code after sharing it.
@@ -310,10 +338,11 @@ not as protection against a determined attacker.
 ## Tests
 
 ```bash
-node tests/interop.test.mjs   # 35 checks — browser and Node crypto agree
+node tests/interop.test.mjs   # 42 checks — browser and Node crypto agree
 node tests/e2e.test.mjs       # 32 checks — real relay, real sockets
 node tests/ooc.test.mjs       # 25 checks — player chat cannot reach a prompt
 node tests/hunt.test.mjs      # 13 probes — adversarial; findings, not a gate
+node tests/portmap.test.mjs   # 16 checks — router protocols, parsing, SSRF guard
 ```
 
 `interop` matters because the key schedule and frame format are implemented
@@ -375,6 +404,24 @@ Seven bugs came out of writing these, all fixed:
 - `ChatBridge` remembered every message id for the life of the session purely to
   detect echoes, which only ever arrive moments after sending. A long session
   accumulated all of them; the sets are now bounded windows.
+- The connection code could only express `ws://host:port`, so an HTTPS tunnel or
+  reverse proxy — the most accessible way to play across the internet, and the
+  only one that works when a player's SillyTavern is on HTTPS — was impossible.
+  Codes can now carry a TLS endpoint and a default port.
+- Tailscale addresses were warned about as "local network only". They are in
+  carrier-grade NAT space, which the check treated as private, but a tailnet
+  reaches across the internet and is the recommended setup — so the warning sent
+  people looking for a problem they did not have.
+- Cross-network play required either router configuration or a mesh VPN, i.e. a
+  setup loop per player. The relay now asks the router to open the port itself
+  over NAT-PMP and UPnP, and uses the public address the router reports.
+- Port-mapping discovery originally probed each candidate gateway in sequence, so
+  hosting blocked for four and a half seconds before a code appeared. Candidates
+  and protocols are now raced under a 2.6-second ceiling.
+- `portMapping` and `publicHost` were added to `status()` but not `describe()`,
+  and `/start` returns `describe()` — so the host UI never received either, and
+  the automatic address could not be used. Caught by probing the real return
+  value rather than reading the code.
 
 ---
 
@@ -400,6 +447,7 @@ server/                ← linked into SillyTavern/plugins/st-multiplayer
   lib/protocol.js      mirror of lib/protocol.js  (KEEP IN SYNC)
   lib/crypto.js        Node crypto, wire-compatible with lib/crypto.js
   lib/relay.js         WebSocket relay, rooms, parity gate, limits
+  lib/portmap.js       NAT-PMP and UPnP port mapping, zero dependencies
 install.mjs            links the relay into SillyTavern's plugins directory
 tests/
 ```
