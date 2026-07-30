@@ -792,6 +792,9 @@ export class Relay {
                 commit: String(entry.commit ?? '').slice(0, 40),
                 branch: String(entry.branch ?? '').slice(0, 80),
                 remoteUrl: String(entry.remoteUrl ?? '').slice(0, 400),
+                // Carried through because it is often the only installable URL
+                // available without an expensive git lookup on the host.
+                homePage: String(entry.homePage ?? '').slice(0, 400),
             })),
         };
 

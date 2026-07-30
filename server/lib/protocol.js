@@ -68,6 +68,10 @@ export const OP = Object.freeze({
     PARITY_CHALLENGE: 'parity.challenge',
     PARITY_REPORT: 'parity.report',
     PARITY_RESULT: 'parity.result',
+    /** Client -> host: read the real git remotes for these extensions. */
+    PARITY_URLS_REQUEST: 'parity.urls.request',
+    /** Host -> client: the answer. Only issued when someone presses Sync. */
+    PARITY_URLS: 'parity.urls',
 
     CARDS_INDEX: 'cards.index',
     CARDS_WANT: 'cards.want',
@@ -140,10 +144,11 @@ export const CLIENT_ALLOWED_OPS = new Set([
     // The out-of-character channel is peer-to-peer by design: it is where
     // players plan, so it is not the host's to control or gate.
     OP.OOC_MESSAGE, OP.OOC_TYPING,
+    OP.PARITY_URLS_REQUEST,
 ]);
 
 /** Opcodes the relay forwards to the host only, rather than broadcasting. */
-export const TO_HOST_ONLY = new Set([OP.CARDS_WANT, OP.CHAT_TURN]);
+export const TO_HOST_ONLY = new Set([OP.CARDS_WANT, OP.CHAT_TURN, OP.PARITY_URLS_REQUEST]);
 
 /**
  * Opcodes echoed back to the sender as well as everyone else. The relay

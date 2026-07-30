@@ -338,11 +338,12 @@ not as protection against a determined attacker.
 ## Tests
 
 ```bash
-node tests/interop.test.mjs   # 42 checks — browser and Node crypto agree
+node tests/interop.test.mjs   # 52 checks — browser and Node crypto agree
 node tests/e2e.test.mjs       # 32 checks — real relay, real sockets
 node tests/ooc.test.mjs       # 25 checks — player chat cannot reach a prompt
 node tests/hunt.test.mjs      # 13 probes — adversarial; findings, not a gate
 node tests/portmap.test.mjs   # 16 checks — router protocols, parsing, SSRF guard
+node tests/sync.test.mjs      # 18 checks — extension sync actually installs things
 ```
 
 `interop` matters because the key schedule and frame format are implemented
@@ -418,6 +419,27 @@ Seven bugs came out of writing these, all fixed:
 - Port-mapping discovery originally probed each candidate gateway in sequence, so
   hosting blocked for four and a half seconds before a code appeared. Candidates
   and protocols are now raced under a 2.6-second ceiling.
+- **Extension sync installed nothing at all, silently.** The parity report
+  stripped `homePage`, and `remoteUrl` was only populated in the non-default
+  `commit` strictness mode — so `buildSyncPlan` had no URL for anything, every
+  entry became an "install this yourself" step, and pressing Sync reported
+  success while doing nothing. The report now carries `homePage`, and the host
+  can be asked for real git remotes on demand when Sync is pressed.
+- `deleteExtension` builds its hook name as `'third-party' + name` with no
+  separator, so passing a bare folder name resolved to `third-partyFoo` and the
+  extension's own delete hook never ran. SillyTavern's own UI passes `/Foo`;
+  this now does too.
+- Sync reported failures as "N step(s) failed, see the log", which is not
+  something anyone can act on. It now lists each failure with its reason and URL.
+- The connection code's address, port and scheme were decided in two places —
+  once when hosting started and once when the code was rotated — and the two had
+  drifted. Rotation ignored the router-supplied public address, so rotating a
+  working code silently downgraded it to a LAN address remote players could not
+  reach. Both now call one tested function.
+- Ticking "behind an HTTPS tunnel" without supplying a hostname produced a
+  `wss://` code aimed at the router's own address on port 443, where nothing is
+  listening. That combination is now refused with an explanation, since it is an
+  easy thing to reach for when you have no address to type.
 - `portMapping` and `publicHost` were added to `status()` but not `describe()`,
   and `/start` returns `describe()` — so the host UI never received either, and
   the automatic address could not be used. Caught by probing the real return

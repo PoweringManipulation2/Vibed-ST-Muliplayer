@@ -548,6 +548,66 @@ export class PortMapper {
     }
 }
 
+/**
+ * Asks the router for its public address without creating a mapping.
+ *
+ * Separate from {@link PortMapper.open} because the two can fail independently:
+ * plenty of routers will answer "what is my WAN address" while refusing to add a
+ * port mapping, and in that case the user still needs the address so they can
+ * forward the port by hand. Answering from the router keeps this entirely on the
+ * local network — no external lookup service involved.
+ *
+ * @returns {Promise<{ok: boolean, address?: string, method?: string, cgnat?: boolean, reason?: string}>}
+ */
+export async function queryExternalAddress({ log = () => {} } = {}) {
+    // NAT-PMP first: one UDP packet, no mapping side effects.
+    const natpmpAttempts = candidateGateways().map(async gateway => ({
+        address: await natpmpExternalAddress(gateway),
+        method: 'NAT-PMP',
+    }));
+
+    let found = natpmpAttempts.length
+        ? await Promise.any(natpmpAttempts).catch(() => null)
+        : null;
+
+    if (!found) {
+        // UPnP GetExternalIPAddress is read-only too.
+        const locations = await ssdpDiscover(1500).catch(() => []);
+        for (const location of locations) {
+            try {
+                const description = await fetchXml(location);
+                const service = findWanService(description.body, location);
+                if (!service) continue;
+                const body = await soapCall(service, 'GetExternalIPAddress', {});
+                const address = /<NewExternalIPAddress>\s*([^<]*?)\s*<\/NewExternalIPAddress>/i.exec(body)?.[1];
+                if (address) {
+                    found = { address, method: 'UPnP' };
+                    break;
+                }
+            } catch (error) {
+                log('info', `${LOG} ${location}: ${error.message}`);
+            }
+        }
+    }
+
+    if (!found?.address) {
+        return { ok: false, reason: 'The router would not report its public address over NAT-PMP or UPnP.' };
+    }
+
+    if (isPrivateIPv4(found.address)) {
+        return {
+            ok: false,
+            cgnat: true,
+            address: found.address,
+            method: found.method,
+            reason: `The router reports ${found.address}, which is a private address — your ISP is using `
+                + 'carrier-grade NAT, so this is not reachable from the internet.',
+        };
+    }
+
+    return { ok: true, address: found.address, method: found.method };
+}
+
 export const __testing = {
     candidateGateways,
     findWanService,

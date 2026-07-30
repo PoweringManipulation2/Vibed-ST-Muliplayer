@@ -158,6 +158,91 @@ await test('a rejected port is caught rather than silently wrapped', () => {
     assert.throws(() => browserProto.encodeConnectionCode({ host: '10.0.0.1', port: 70000, psk }), /out of range/);
 });
 
+console.log('\nAdvertisement resolution');
+
+const resolve = input => browserProto.resolveAdvertisement(input);
+
+await test('blank address plus a router mapping is the zero-setup path', () => {
+    // This is what "leave everything blank and press Start hosting" produces.
+    const r = resolve({ publicHost: '203.0.113.9', detectedHost: '192.168.1.42', listenPort: 8899 });
+    assert.equal(r.error, null);
+    assert.equal(r.host, '203.0.113.9');
+    assert.equal(r.port, 8899);
+    assert.equal(r.secure, false);
+    assert.equal(r.source, 'router');
+    assert.equal(browserProto.connectionUrl(r), 'ws://203.0.113.9:8899/');
+    assert.deepEqual(r.warnings, [], 'a working public address should not warn');
+});
+
+await test('blank address with no mapping falls back and warns', () => {
+    const r = resolve({ detectedHost: '192.168.1.42', listenPort: 8899 });
+    assert.equal(r.error, null);
+    assert.equal(r.source, 'detected');
+    assert.equal(r.host, '192.168.1.42');
+    assert.equal(r.warnings.length, 1);
+    assert.match(r.warnings[0], /local-network/);
+});
+
+await test('ticking HTTPS with no address is refused, not silently broken', () => {
+    // Previously this produced wss://<router-ip>/ on port 443 against a relay
+    // serving plain ws on 8899 — a code that could never connect.
+    const r = resolve({ advertiseSecure: true, publicHost: '203.0.113.9', listenPort: 8899 });
+    assert.ok(r.error, 'the impossible combination was accepted');
+    assert.match(r.error, /needs one|hostname/i);
+});
+
+await test('HTTPS with a tunnel hostname omits the port', () => {
+    const r = resolve({ advertiseHost: 'shy-fog.trycloudflare.com', advertiseSecure: true, listenPort: 8899 });
+    assert.equal(r.error, null);
+    assert.equal(r.port, 0);
+    assert.equal(browserProto.connectionUrl(r), 'wss://shy-fog.trycloudflare.com/');
+});
+
+await test('an explicit public port overrides the derived one', () => {
+    const r = resolve({ advertiseHost: 'tavern.example.net', advertiseSecure: true, advertisePort: 8443, listenPort: 8899 });
+    assert.equal(browserProto.connectionUrl(r), 'wss://tavern.example.net:8443/');
+
+    const plain = resolve({ advertiseHost: '203.0.113.9', advertisePort: 9000, listenPort: 8899 });
+    assert.equal(browserProto.connectionUrl(plain), 'ws://203.0.113.9:9000/');
+});
+
+await test('a typed address with LAN sharing off is refused', () => {
+    const r = resolve({ advertiseHost: '203.0.113.9', bindLan: false, listenPort: 8899 });
+    assert.ok(r.error);
+    assert.match(r.error, /only listens on 127\.0\.0\.1/);
+});
+
+await test('a loopback address with LAN sharing off is allowed (ssh -L case)', () => {
+    const r = resolve({ advertiseHost: '127.0.0.1', bindLan: false, listenPort: 8899 });
+    assert.equal(r.error, null);
+    assert.match(r.warnings[0], /loopback/);
+});
+
+await test('a typed address always beats the router and the detected one', () => {
+    const r = resolve({
+        advertiseHost: 'my.duckdns.org',
+        publicHost: '203.0.113.9',
+        detectedHost: '192.168.1.42',
+        listenPort: 8899,
+    });
+    assert.equal(r.host, 'my.duckdns.org');
+    assert.equal(r.source, 'typed');
+});
+
+await test('a typed Tailscale address is reported accurately, not warned about', () => {
+    const r = resolve({ advertiseHost: '100.101.102.103', listenPort: 8899 });
+    assert.equal(r.error, null);
+    assert.match(r.warnings[0], /Tailscale/);
+    assert.ok(!r.warnings[0].includes('cannot reach'));
+});
+
+await test('handles being called with nothing at all', () => {
+    const r = resolve({});
+    assert.equal(r.error, null);
+    assert.equal(typeof r.host, 'string');
+    assert.ok(Number.isFinite(r.port));
+});
+
 console.log('\nAddress classification for advice');
 
 await test('Tailscale space is a tailnet, not a LAN', () => {

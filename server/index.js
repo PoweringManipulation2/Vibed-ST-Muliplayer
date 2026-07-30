@@ -25,6 +25,7 @@
 
 import { PROTOCOL_REVISION } from './lib/protocol.js';
 import { Relay, localAddresses } from './lib/relay.js';
+import { queryExternalAddress } from './lib/portmap.js';
 
 export const info = {
     id: 'st-multiplayer',
@@ -143,6 +144,19 @@ export async function init(router) {
     router.get('/status', (request, response) => {
         noStore(response);
         response.json({ ...relay.status(), revision: PROTOCOL_REVISION, addresses: localAddresses() });
+    });
+
+    // ----------------------------------------------------- external-address --
+    // Asks the router what its public address is, so the host does not have to
+    // go and look it up somewhere. Read-only: no mapping is created.
+    router.get('/external-address', async (request, response) => {
+        if (!requireAdmin(request, response)) return;
+        try {
+            noStore(response);
+            response.json(await queryExternalAddress({ log }));
+        } catch (error) {
+            fail(response, error);
+        }
     });
 
     // --------------------------------------------------------------- rotate --
