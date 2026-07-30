@@ -78,10 +78,22 @@ export const OP = Object.freeze({
     CARDS_AVATAR: 'cards.avatar',
     CARDS_DEFINITION: 'cards.definition',
 
+    /**
+     * Host -> peers: which shared card this room is roleplaying in. Chat traffic
+     * is confined to that card's chat, so a message can never land in an
+     * unrelated chat such as the assistant window that opens on startup.
+     */
+    SESSION_STATE: 'session.state',
+    /** Client -> host: I have opened the session chat, send me the transcript. */
+    SESSION_JOIN: 'session.join',
+
     CHAT_STATE: 'chat.state',
     CHAT_APPEND: 'chat.append',
     CHAT_TURN: 'chat.turn',
     CHAT_TYPING: 'chat.typing',
+
+    /** A peer publishing its persona, so the room can see who it is playing. */
+    PERSONA_STATE: 'persona.state',
 
     OOC_MESSAGE: 'ooc.message',
     OOC_HISTORY: 'ooc.history',
@@ -145,10 +157,16 @@ export const CLIENT_ALLOWED_OPS = new Set([
     // players plan, so it is not the host's to control or gate.
     OP.OOC_MESSAGE, OP.OOC_TYPING,
     OP.PARITY_URLS_REQUEST,
+    OP.SESSION_JOIN,
+    // Personas are peer-to-peer: everyone should be able to see who everyone
+    // else is playing, not only the host.
+    OP.PERSONA_STATE,
 ]);
 
 /** Opcodes the relay forwards to the host only, rather than broadcasting. */
-export const TO_HOST_ONLY = new Set([OP.CARDS_WANT, OP.CHAT_TURN, OP.PARITY_URLS_REQUEST]);
+export const TO_HOST_ONLY = new Set([
+    OP.CARDS_WANT, OP.CHAT_TURN, OP.PARITY_URLS_REQUEST, OP.SESSION_JOIN,
+]);
 
 /**
  * Opcodes echoed back to the sender as well as everyone else. The relay
@@ -156,6 +174,9 @@ export const TO_HOST_ONLY = new Set([OP.CARDS_WANT, OP.CHAT_TURN, OP.PARITY_URLS
  * sequence instead of each seeing its own messages in local order.
  */
 export const ECHO_TO_SENDER = new Set([OP.OOC_MESSAGE]);
+
+/** Opcodes the relay stamps with the sender's name as well as its id. */
+export const STAMP_IDENTITY = new Set([OP.OOC_MESSAGE, OP.PERSONA_STATE]);
 
 /** Caps for the out-of-character channel. Mirrors lib/protocol.js. */
 export const OOC = Object.freeze({

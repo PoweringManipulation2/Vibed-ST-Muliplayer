@@ -557,3 +557,29 @@
     padding: 2px 8px;
     font-size: 0.8em;
 }
+
+/* ── persona profiles ────────────────────────────────────────────────────── */
+
+.stmp-persona-profile .stmp-persona-text,
+.stmp-persona-profile .stmp-persona-lore {
+    margin-top: 4px;
+    padding: 8px;
+    max-height: 30vh;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    border-radius: 4px;
+    background-color: var(--black30a);
+}
+
+.stmp-persona-profile .stmp-persona-lore {
+    font-family: var(--monoFontFamily, monospace);
+    font-size: 0.82em;
+    line-height: 1.5;
+}
+
+#stmp_settings .stmp-persona {
+    padding: 0 7px;
+    margin: 0;
+    line-height: 1.6;
+}

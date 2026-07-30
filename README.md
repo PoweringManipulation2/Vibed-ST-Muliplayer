@@ -345,6 +345,7 @@ node tests/hunt.test.mjs      # 13 probes — adversarial; findings, not a gate
 node tests/portmap.test.mjs   # 16 checks — router protocols, parsing, SSRF guard
 node tests/sync.test.mjs      # 18 checks — extension sync actually installs things
 node tests/cards.test.mjs     # 19 checks — the card-sharing chain end to end
+node tests/session.test.mjs   # 15 checks — chat containment and persona payload
 ```
 
 `interop` matters because the key schedule and frame format are implemented
@@ -420,6 +421,23 @@ Seven bugs came out of writing these, all fixed:
 - Port-mapping discovery originally probed each candidate gateway in sequence, so
   hosting blocked for four and a half seconds before a code appeared. Candidates
   and protocols are now raced under a 2.6-second ceiling.
+- **Chat leaked into unrelated chats.** The bridge relayed whatever chat happened
+  to be open and wrote inbound messages into whatever chat the receiver had open,
+  so a hosted character's greeting could land in the assistant chat that opens on
+  startup — and a client's private local roleplay would be broadcast to the room.
+  There is now an explicit room session: the host designates one shared character,
+  and chat only moves when both ends are in that chat.
+- **Shared cards arrived with every field empty.** Definitions were only fetched
+  when a card was clicked, so the character list showed name-only stubs with no
+  description, greeting or lorebook. Definitions are now pulled as soon as the
+  catalogue arrives, still held in memory only.
+- **Personas carried only a name and a description.** SillyTavern injects a
+  persona at a configured position, depth and role, and a persona can have a
+  lorebook bound to it — none of which travelled, so the host's model had far less
+  to work with than the player expected. All of it is sent now, lorebook included.
+- **Only the host could edit or delete.** Any player can now, and edits are
+  addressed by message id rather than index, which drifts as soon as two peers'
+  views differ by one message.
 - **Sharing characters shared nothing, and said so.** The picker read its
   checkboxes after `callGenericPopup` resolved, but SillyTavern removes the
   dialog from the DOM before `show()` settles — so the query matched nothing, the
