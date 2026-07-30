@@ -60,8 +60,25 @@ command string, so a message containing pipes or braces can't be parsed as
 script. History is held by the relay, not the host, so someone joining late sees
 what was already agreed, and the channel survives a host reconnect.
 
-**Everyone keeps their own persona.** Personas and local characters stay local.
-Only a peer's resolved persona name and description travel with a turn.
+**Everyone keeps their own persona, and the model is told about all of them.**
+Personas stay local — nobody has to adopt anyone else's. What travels is each
+player's persona name, description, injection position and depth, a small
+portrait, and their persona lorebook if they have one.
+
+The host assembles that into two things. A roster block naming every player in
+the scene, so the model knows how many people it is talking to and does not merge
+them into one character — including players whose persona has no description,
+since they are still present and still speaking. And the lorebooks are merged into
+a real World Info book bound to the session chat, rather than keyword-scanned and
+pasted inline: that way SillyTavern activates them on the same code path as any
+other lorebook, so secondary keys, selective logic, insertion position, order,
+depth, probability, inclusion groups, recursion and the token budget all behave
+normally. Binding to the chat rather than globally means the book applies in the
+shared session and provably nowhere else, and it is unbound when the session ends.
+
+The Multiplayer panel reports exactly what reached the prompt — how many players
+are named, how many have descriptions, how many lorebook entries are active, and
+who has published nothing yet.
 
 ---
 
@@ -350,7 +367,8 @@ node tests/hunt.test.mjs      # 13 probes — adversarial; findings, not a gate
 node tests/portmap.test.mjs   # 16 checks — router protocols, parsing, SSRF guard
 node tests/sync.test.mjs      # 18 checks — extension sync actually installs things
 node tests/cards.test.mjs     # 19 checks — the card-sharing chain end to end
-node tests/session.test.mjs   # 39 checks — chat containment and persona payload
+node tests/lore.test.mjs      # 22 checks — shared persona lorebooks and the roster
+node tests/session.test.mjs   # 49 checks — chat containment and persona payload
 ```
 
 `interop` matters because the key schedule and frame format are implemented
@@ -426,6 +444,33 @@ Seven bugs came out of writing these, all fixed:
 - Port-mapping discovery originally probed each candidate gateway in sequence, so
   hosting blocked for four and a half seconds before a code appeared. Candidates
   and protocols are now raced under a 2.6-second ceiling.
+- **Persona lorebooks were keyword-scanned and pasted inline.** That quietly
+  ignored secondary keys, selective logic, per-entry scan depth, whole-word and
+  case sensitivity, insertion position, order, at-depth placement, probability,
+  inclusion groups, recursion and the token budget — an entry configured to sit at
+  depth 4 as an assistant note was dumped inline as system text instead. They are
+  now merged into a genuine World Info book bound to the session chat, so
+  SillyTavern activates them itself.
+- **Players with no persona description were invisible to the model.** They were
+  filtered out of the injected block entirely, so the model did not know they
+  existed even as they spoke. Every player is now named in a roster line.
+- **Remote messages wore the receiver's own face.** The portrait capture read
+  `power_user.default_persona`, which is the *favourite* persona and stays null
+  unless explicitly set — so no portrait was ever captured and every remote
+  message fell back to whatever avatar the receiver had. It now reads the active
+  persona (`user_avatar`), with the stored per-avatar record as a fallback.
+- **The "another player" badge landed on the wrong message and never on old ones.**
+  It decorated whatever was last in the DOM on the next animation frame, so an
+  auto-reply rendering in between stole the badge — and nothing ever decorated
+  messages already on screen. Messages now carry their author's identity, badges
+  are addressed by `mesid`, and the whole rendered window is swept whenever the
+  chat changes.
+- **Only the host's persona reached the prompt.** The injection included the
+  local persona, which SillyTavern already injects — so the block looked populated
+  even when no peer persona had arrived, hiding the real problem. Own persona is
+  now excluded, and the panel reports exactly whose personas are in the prompt.
+- **A transcript snapshot discarded attribution.** Anyone joining mid-session got
+  history with no indication of who said what, which was most of their transcript.
 - **A client's message produced no reply.** The turn was appended to the host's
   chat and nothing ever asked the model to answer it, so a player could speak into
   silence. The host now triggers a reply through `/trigger`, which generates
@@ -541,6 +586,7 @@ lib/
   parity.js            fingerprinting, diffing, sync execution
   cards.js             stub cards, hydration, chunked avatars
   chat.js              chat relay
+  lore.js              merges peers' persona lorebooks into a World Info book
   ooc.js               player-only channel (never touches context.chat)
   typing.js            per-player typing indicators
   ui.js                panel, cloud badges, sync dialog

@@ -79,13 +79,15 @@ function makeContext({ persona = {}, lorebooks = {} } = {}) {
     };
 }
 
-function makeBridge({ role = 'host', active = true, context = makeContext() } = {}) {
+function makeBridge({ role = 'host', active = true, context = makeContext(), selfPeerId = 'me', persona = {} } = {}) {
     const sent = [];
     const bridge = new ChatBridge({
         getContext: () => context,
         send: payload => sent.push(payload),
         role: () => role,
         isActive: () => active,
+        selfPeerId: () => selfPeerId,
+        activePersonaAvatar: () => persona.avatarId ?? 'me.png',
     });
     bridge.attach();
     return { bridge, sent, context, fire: (type, ...args) => context.handlers.get(type)?.(...args) };
@@ -307,38 +309,42 @@ await test('remote persona descriptions actually reach the prompt', () => {
     assert.equal(injected[0].position, 0, 'should be injected in-prompt');
 });
 
-await test('a lorebook entry is included when its keyword appears in recent chat', () => {
+await test('lorebook content is handed to World Info, not inlined here', () => {
+    // Superseded behaviour: this used to scan recent chat for each entry's
+    // keywords and paste matches into the injected block. That silently ignored
+    // secondary keys, selective logic, position, order, depth, probability,
+    // inclusion groups, recursion and the token budget.
+    //
+    // Lorebooks now go through a session-bound World Info book (lib/lore.js), so
+    // SillyTavern activates them on the same code path as any other lorebook.
+    // The contract asserted here is the handoff: entry text must NOT appear in
+    // the injected block, or it would be duplicated and bypass its own settings.
+    // tests/lore.test.mjs covers the merge and binding.
     const persona = {
         name: 'Casey',
         description: 'An archivist.',
-        lorebook: { entries: [{ key: ['ledger'], content: 'The ledger is cursed.' }] },
+        lorebook: {
+            entries: [
+                { key: ['ledger'], content: 'MATCHED_LORE_MARKER' },
+                { key: ['never-said'], constant: true, content: 'CONSTANT_LORE_MARKER' },
+            ],
+        },
     };
-    const withMatch = bridgeWithPersonas({ p2: persona }, ['I open the ledger carefully.']);
-    assert.match(withMatch.bridge.injectPersonas(), /The ledger is cursed\./);
 
-    const withoutMatch = bridgeWithPersonas({ p2: persona }, ['I look at the sky.']);
-    assert.ok(!withoutMatch.bridge.injectPersonas().includes('cursed'),
-        'an unmatched lorebook entry should stay out of the prompt');
+    const { bridge } = bridgeWithPersonas({ p2: persona }, ['I open the ledger carefully.']);
+    const text = bridge.injectPersonas(6, 'host-1');
+
+    assert.match(text, /Casey: An archivist\./, 'the description still belongs in the block');
+    assert.ok(!text.includes('MATCHED_LORE_MARKER'), 'a keyword-matched entry must not be inlined');
+    assert.ok(!text.includes('CONSTANT_LORE_MARKER'), 'a constant entry must not be inlined');
 });
 
-await test('a constant lorebook entry is always included', () => {
+await test('a player with a lorebook but no description is still described as present', () => {
     const { bridge } = bridgeWithPersonas({
-        p2: {
-            name: 'Casey', description: 'An archivist.',
-            lorebook: { entries: [{ key: ['never-said'], constant: true, content: 'Casey has one eye.' }] },
-        },
-    }, ['unrelated talk']);
-    assert.match(bridge.injectPersonas(), /Casey has one eye\./);
-});
-
-await test('a disabled lorebook entry is skipped', () => {
-    const { bridge } = bridgeWithPersonas({
-        p2: {
-            name: 'Casey', description: 'An archivist.',
-            lorebook: { entries: [{ key: ['ledger'], disable: true, content: 'Should not appear.' }] },
-        },
-    }, ['the ledger']);
-    assert.ok(!bridge.injectPersonas().includes('Should not appear'));
+        p2: { name: 'Casey', description: '', lorebook: { entries: [{ key: ['a'], content: 'x' }] } },
+    });
+    const text = bridge.injectPersonas(6, 'host-1');
+    assert.match(text, /Casey/, 'a player carrying only lore must still be named');
 });
 
 await test('with no remote personas the injection is cleared, not left stale', () => {
@@ -400,9 +406,12 @@ await test('a remote turn is flagged so it can be marked in the UI', async () =>
         { id: 't1', text: 'hello', persona: { name: 'Casey' } },
         { id: 'p2', name: 'Friend' });
 
-    assert.equal(message.extra.stmp.remote, true, 'a remote turn must be distinguishable from your own');
-    assert.equal(message.extra.stmp.player, 'Friend');
-    assert.equal(message.extra.stmp.personaName, 'Casey');
+    // Schema note: attribution is now by author identity rather than a bare
+    // "remote" flag, so a receiver can decide for itself whose message it is.
+    assert.equal(message.extra.stmp.player, true, 'a player turn must be distinguishable from the model\'s output');
+    assert.equal(message.extra.stmp.authorPeerId, 'p2');
+    assert.equal(message.extra.stmp.author, 'Casey');
+    assert.equal(message.extra.stmp.playerName, 'Friend');
 });
 
 console.log('\nStreaming: no duplicated reply');
@@ -582,6 +591,157 @@ await test('names are capped so the bar cannot be stretched', () => {
     const { typing } = indicators();
     typing.receive({ from: 'p2', name: 'n'.repeat(500), typing: true });
     assert.ok(typing.describe().length < 80);
+});
+
+console.log('\nAuthorship attribution');
+
+const marker = message => message?.extra?.stmp ?? {};
+
+await test('my own turn records me as the author', () => {
+    const { context, fire } = makeBridge({ role: 'host', active: true, selfPeerId: 'host-1' });
+    context.chat.push({ name: 'Legoshi', is_user: true, mes: 'I lie still.', extra: {} });
+    fire('ms', 0);
+
+    const m = marker(context.chat[0]);
+    assert.equal(m.player, true);
+    assert.equal(m.authorPeerId, 'host-1', 'without an author id no receiver can attribute the message');
+    assert.equal(m.author, 'Legoshi');
+});
+
+await test('a model reply is explicitly not a player turn', () => {
+    // The badge landed on the model's message; this is the flag that prevents it.
+    const { context, fire } = makeBridge({ role: 'host', active: true, selfPeerId: 'host-1' });
+    context.chat.push({ name: 'Dragon Dungeon', is_user: false, mes: 'She descends.', extra: {} });
+    fire('mr', 0);
+
+    assert.equal(marker(context.chat[0]).player, false);
+    assert.equal(marker(context.chat[0]).authorPeerId, undefined);
+});
+
+await test('an accepted player turn is attributed to that peer', async () => {
+    const { bridge } = makeBridge({ role: 'host', active: true, selfPeerId: 'host-1' });
+    const message = await bridge.acceptRemoteTurn(
+        { id: 't1', text: 'I nudge Legoshi', persona: { name: 'GreenHouse' } },
+        { id: 'peer-2', name: 'GreenHouse' });
+
+    const m = marker(message);
+    assert.equal(m.player, true);
+    assert.equal(m.authorPeerId, 'peer-2');
+    assert.equal(m.author, 'GreenHouse');
+});
+
+await test('a mirrored message keeps its original author, not the relayer', async () => {
+    // On a client, the host's own turn must still be attributable to the host.
+    const { bridge, context } = makeBridge({ role: 'client', active: true, selfPeerId: 'peer-3' });
+    await bridge.applyRemoteMessage({
+        message: {
+            name: 'Legoshi', is_user: true, mes: 'I lie still.',
+            extra: { stmp: { id: 'h1', player: true, author: 'Legoshi', authorPeerId: 'host-1' } },
+        },
+    });
+
+    const m = marker(context.chat[0]);
+    assert.equal(m.authorPeerId, 'host-1', 'the host should be attributable from a client');
+    assert.equal(m.player, true);
+});
+
+await test('a mirrored model reply is not attributed to a player', async () => {
+    const { bridge, context } = makeBridge({ role: 'client', active: true, selfPeerId: 'peer-3' });
+    await bridge.applyRemoteMessage({
+        message: {
+            name: 'Dragon Dungeon', is_user: false, mes: 'She descends.',
+            extra: { stmp: { id: 'b1', player: false } },
+        },
+    });
+    assert.equal(marker(context.chat[0]).player, false, 'the model would be badged as another player');
+});
+
+await test('attribution survives a transcript snapshot', async () => {
+    const { bridge, context } = makeBridge({ role: 'client', active: true, selfPeerId: 'peer-3' });
+    await bridge.applySnapshot({
+        messages: [
+            { name: 'Legoshi', is_user: true, mes: 'a', extra: { stmp: { id: 's1', player: true, author: 'Legoshi', authorPeerId: 'host-1' } } },
+            { name: 'Dragon', is_user: false, mes: 'b', extra: { stmp: { id: 's2', player: false } } },
+        ],
+    });
+
+    // Past messages used to carry no attribution at all, so scrolling back showed
+    // nothing; a snapshot must preserve it.
+    assert.equal(marker(context.chat[0]).authorPeerId, 'host-1');
+    assert.equal(marker(context.chat[0]).player, true);
+    assert.equal(marker(context.chat[1]).player, false);
+});
+
+await test('decorateAll is safe with no DOM and does not throw', () => {
+    const { bridge } = makeBridge({ role: 'host', active: true });
+    bridge.decorateAll();
+    bridge.decorateAll();
+});
+
+console.log('\nActive persona is read, not the favourite');
+
+await test('the active persona avatar is used, not default_persona', async () => {
+    // default_persona is the *favourite* and is null unless explicitly set, so
+    // reading it meant no portrait was ever captured and every remote message
+    // fell back to the receiver's own picture.
+    const context = makeContext({ persona: { name: 'GreenHouse', description: 'A player.' } });
+    context.powerUserSettings.default_persona = null;
+    context.getThumbnailUrl = (type, file) => `/thumbnail?type=${type}&file=${file}`;
+
+    const captured = [];
+    const bridge = new ChatBridge({
+        getContext: () => context,
+        send: () => {},
+        role: () => 'client',
+        isActive: () => true,
+        selfPeerId: () => 'peer-2',
+        activePersonaAvatar: () => 'greenhouse.png',
+    });
+    bridge.capturePersonaPortrait = async id => { captured.push(id); return null; };
+
+    const persona = await bridge.describeLocalPersona();
+    assert.equal(persona.avatarId, 'greenhouse.png', 'the active persona avatar was not used');
+    assert.deepEqual(captured, ['greenhouse.png']);
+});
+
+await test('a per-avatar description is used when none is applied', async () => {
+    const context = makeContext({ persona: { name: 'GreenHouse' } });
+    context.powerUserSettings.persona_description = '';
+    context.powerUserSettings.persona_descriptions = {
+        'greenhouse.png': { description: 'From the persona record.', lorebook: 'GHLore' },
+    };
+
+    const bridge = new ChatBridge({
+        getContext: () => context,
+        send: () => {},
+        role: () => 'client',
+        isActive: () => true,
+        selfPeerId: () => 'p',
+        activePersonaAvatar: () => 'greenhouse.png',
+    });
+    bridge.capturePersonaPortrait = async () => null;
+
+    const persona = await bridge.describeLocalPersona();
+    assert.equal(persona.description, 'From the persona record.');
+    assert.equal(persona.lorebookName, 'GHLore');
+});
+
+await test('the injection excludes my own persona', () => {
+    const { bridge, injected } = bridgeWithPersonas({
+        'host-1': { name: 'Legoshi', description: 'The host.' },
+        'peer-2': { name: 'GreenHouse', description: 'The other player.' },
+    });
+
+    const text = bridge.injectPersonas(6, 'host-1');
+    assert.ok(!text.includes('The host.'), 'SillyTavern already injects our own persona');
+    assert.match(text, /GreenHouse: The other player\./);
+    assert.equal(injected.length, 1);
+});
+
+await test('with only my own persona known, nothing is injected', () => {
+    const { bridge } = bridgeWithPersonas({ 'host-1': { name: 'Legoshi', description: 'The host.' } });
+    assert.equal(bridge.injectPersonas(6, 'host-1'), '',
+        'injecting only our own persona made the block look correct when no peer persona had arrived');
 });
 
 console.log(`\n${passed} passed, ${failed} failed\n`);

@@ -678,3 +678,18 @@
 @media (prefers-reduced-motion: reduce) {
     #stmp_typing_bar { transition: none; }
 }
+
+#stmp_settings .stmp-prompt-state {
+    margin-top: 8px;
+    padding: 6px 8px;
+    border-radius: 4px;
+    font-size: 0.82em;
+    line-height: 1.45;
+    opacity: 0.85;
+    background-color: var(--black30a);
+    border-left: 2px solid var(--SmartThemeBorderColor);
+}
+
+#stmp_settings .stmp-prompt-state.stmp-prompt-warn {
+    border-left-color: #e0a52a;
+}

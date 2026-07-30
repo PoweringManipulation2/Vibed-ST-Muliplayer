@@ -15,7 +15,10 @@ import {
     extensionNames, extensionTypes, getExtensionManifest, installExtension,
     renderExtensionTemplateAsync,
 } from '../../../extensions.js';
-import { getRequestHeaders, saveSettingsDebounced } from '../../../../script.js';
+// `user_avatar` is a live module binding holding the *active* persona's avatar
+// filename. It is not on getContext(), and it is not the same thing as
+// `power_user.default_persona`, which is only the favourite.
+import { getRequestHeaders, saveSettingsDebounced, user_avatar } from '../../../../script.js';
 
 import { DEFAULT_PORT, LIMITS, SETTINGS_KEY, parseExtensionFolder } from './lib/protocol.js';
 import { MultiplayerSession } from './lib/session.js';
@@ -100,6 +103,8 @@ function buildDeps() {
     return {
         getContext: () => globalThis.SillyTavern.getContext(),
         getRequestHeaders,
+        /** Read through a getter so it always reflects the current persona. */
+        activePersonaAvatar: () => user_avatar,
         settings,
         save,
         extensionFolder: EXTENSION_FOLDER,
@@ -137,7 +142,7 @@ globalThis.stmpGenerateInterceptor = async function stmpGenerateInterceptor(chat
     if (session.role === 'host') {
         if (session.inSessionChat()) {
             try {
-                session.chat.injectPersonas();
+                session.chat.injectPersonas(6, session.peerId);
             } catch (error) {
                 console.error('[Multiplayer] Could not inject player personas', error);
             }
