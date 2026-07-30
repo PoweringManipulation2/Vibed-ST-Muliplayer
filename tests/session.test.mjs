@@ -275,5 +275,314 @@ await test('a peer with no persona is still recorded under its own name', async 
     assert.equal(bridge.personas.has('p3'), false, 'a null persona should not fabricate an entry');
 });
 
+console.log('\nPrompt injection');
+
+function bridgeWithPersonas(personas, chatText = []) {
+    const injected = [];
+    const context = makeContext();
+    context.setExtensionPrompt = (key, value, position, depth, scan, role) => {
+        injected.push({ key, value, position, depth, scan, role });
+    };
+    context.extensionPromptTypes = { NONE: -1, IN_PROMPT: 0, IN_CHAT: 1, BEFORE_PROMPT: 2 };
+    context.extensionPromptRoles = { SYSTEM: 0, USER: 1, ASSISTANT: 2 };
+    context.chat = chatText.map(mes => ({ mes, extra: {} }));
+
+    const { bridge } = makeBridge({ role: 'host', active: true, context });
+    for (const [peerId, persona] of Object.entries(personas)) bridge.rememberPersona(peerId, persona);
+    return { bridge, injected };
+}
+
+await test('remote persona descriptions actually reach the prompt', () => {
+    // The gap that made replies wrong: personas arrived and were stored, but
+    // nothing ever put them in front of the model.
+    const { bridge, injected } = bridgeWithPersonas({
+        p2: { name: 'Casey', description: 'A tired archivist who distrusts machines.' },
+        p3: { name: 'Riley', description: 'A weary captain.' },
+    });
+
+    const text = bridge.injectPersonas();
+    assert.equal(injected.length, 1, 'nothing was registered as an extension prompt');
+    assert.match(text, /Casey: A tired archivist who distrusts machines\./);
+    assert.match(text, /Riley: A weary captain\./);
+    assert.equal(injected[0].position, 0, 'should be injected in-prompt');
+});
+
+await test('a lorebook entry is included when its keyword appears in recent chat', () => {
+    const persona = {
+        name: 'Casey',
+        description: 'An archivist.',
+        lorebook: { entries: [{ key: ['ledger'], content: 'The ledger is cursed.' }] },
+    };
+    const withMatch = bridgeWithPersonas({ p2: persona }, ['I open the ledger carefully.']);
+    assert.match(withMatch.bridge.injectPersonas(), /The ledger is cursed\./);
+
+    const withoutMatch = bridgeWithPersonas({ p2: persona }, ['I look at the sky.']);
+    assert.ok(!withoutMatch.bridge.injectPersonas().includes('cursed'),
+        'an unmatched lorebook entry should stay out of the prompt');
+});
+
+await test('a constant lorebook entry is always included', () => {
+    const { bridge } = bridgeWithPersonas({
+        p2: {
+            name: 'Casey', description: 'An archivist.',
+            lorebook: { entries: [{ key: ['never-said'], constant: true, content: 'Casey has one eye.' }] },
+        },
+    }, ['unrelated talk']);
+    assert.match(bridge.injectPersonas(), /Casey has one eye\./);
+});
+
+await test('a disabled lorebook entry is skipped', () => {
+    const { bridge } = bridgeWithPersonas({
+        p2: {
+            name: 'Casey', description: 'An archivist.',
+            lorebook: { entries: [{ key: ['ledger'], disable: true, content: 'Should not appear.' }] },
+        },
+    }, ['the ledger']);
+    assert.ok(!bridge.injectPersonas().includes('Should not appear'));
+});
+
+await test('with no remote personas the injection is cleared, not left stale', () => {
+    const { bridge, injected } = bridgeWithPersonas({});
+    assert.equal(bridge.injectPersonas(), '');
+    assert.equal(injected.at(-1).value, '', 'a stale block would follow the host into other chats');
+
+    bridge.clearPersonaInjection();
+    assert.equal(injected.at(-1).value, '');
+});
+
+console.log('\nRemote message presentation');
+
+await test('a remote turn carries the sender\'s portrait, not the receiver\'s', async () => {
+    const { bridge } = makeBridge({ role: 'host', active: true });
+    bridge.rememberPersona('p2', {
+        name: 'Casey',
+        description: 'An archivist.',
+        avatarData: 'data:image/webp;base64,AAAA',
+    });
+
+    const message = await bridge.acceptRemoteTurn({ id: 't1', text: 'I check the ledger.', persona: { name: 'Casey' } }, { id: 'p2' });
+    assert.equal(message.force_avatar, 'data:image/webp;base64,AAAA',
+        'without force_avatar every remote player wears the local persona picture');
+});
+
+await test('a lightweight turn update does not wipe the stored portrait', async () => {
+    // Turns carry a partial persona on purpose; treating it as the whole truth
+    // made the face revert to the receiver's own after the first message.
+    const { bridge } = makeBridge({ role: 'host', active: true });
+    bridge.rememberPersona('p2', { name: 'Casey', description: 'Full.', avatarData: 'data:image/webp;base64,AAAA', lorebookName: 'CaseyLore' });
+    await bridge.acceptRemoteTurn({ id: 't1', text: 'hi', persona: { name: 'Casey', description: 'Full.' } }, { id: 'p2' });
+
+    const stored = bridge.personas.get('p2');
+    assert.equal(stored.avatarData, 'data:image/webp;base64,AAAA');
+    assert.equal(stored.lorebookName, 'CaseyLore');
+});
+
+await test('only data URLs are accepted as a portrait', () => {
+    const { bridge } = makeBridge({ role: 'host', active: true });
+    for (const bad of [
+        'https://evil.example/track.png', '/local/path.png', 'javascript:alert(1)',
+        'data:text/html;base64,AAAA', 42, null,
+    ]) {
+        bridge.rememberPersona('p2', { name: 'X', avatarData: bad });
+        assert.equal(bridge.personas.get('p2').avatarData, null, `accepted ${String(bad)}`);
+    }
+});
+
+await test('an oversized portrait is rejected rather than relayed', () => {
+    const { bridge } = makeBridge({ role: 'host', active: true });
+    bridge.rememberPersona('p2', { name: 'X', avatarData: `data:image/png;base64,${'A'.repeat(300 * 1024)}` });
+    assert.equal(bridge.personas.get('p2').avatarData, null);
+});
+
+await test('a remote turn is flagged so it can be marked in the UI', async () => {
+    const { bridge } = makeBridge({ role: 'host', active: true });
+    const message = await bridge.acceptRemoteTurn(
+        { id: 't1', text: 'hello', persona: { name: 'Casey' } },
+        { id: 'p2', name: 'Friend' });
+
+    assert.equal(message.extra.stmp.remote, true, 'a remote turn must be distinguishable from your own');
+    assert.equal(message.extra.stmp.player, 'Friend');
+    assert.equal(message.extra.stmp.personaName, 'Casey');
+});
+
+console.log('\nStreaming: no duplicated reply');
+
+function streamingClient() {
+    const context = makeContext();
+    const { bridge } = makeBridge({ role: 'client', active: true, context });
+    return { bridge, context };
+}
+
+await test('a token arriving after the reply is ignored', async () => {
+    // The duplication: the host coalesces tokens on an 80ms timer, so one could
+    // land after GEN_END and after the finished message, and the receiver built a
+    // fresh placeholder holding the full text — a second copy of the reply.
+    const { bridge, context } = streamingClient();
+
+    bridge.beginStream();
+    bridge.applyStreamToken({ text: 'She no' });
+    assert.equal(context.chat.length, 1, 'a placeholder should exist while streaming');
+
+    await bridge.applyRemoteMessage({
+        message: { name: 'Ada', is_user: false, mes: 'She nods slowly.', extra: { stmp: { id: 'r1' } } },
+    });
+    bridge.endStream();
+    assert.equal(context.chat.length, 1, 'the placeholder should have been replaced, not kept');
+    assert.equal(context.chat[0].mes, 'She nods slowly.');
+
+    // The late frame.
+    bridge.applyStreamToken({ text: 'She nods slowly.' });
+    assert.equal(context.chat.length, 1, 'a stray token created a duplicate reply');
+});
+
+await test('tokens before a stream starts are ignored', () => {
+    const { bridge, context } = streamingClient();
+    bridge.applyStreamToken({ text: 'orphan' });
+    assert.equal(context.chat.length, 0);
+});
+
+await test('a normal stream still renders and resolves once', async () => {
+    const { bridge, context } = streamingClient();
+    bridge.beginStream();
+    bridge.applyStreamToken({ text: 'She' });
+    bridge.applyStreamToken({ text: 'She nods' });
+    assert.equal(context.chat.length, 1);
+
+    await bridge.applyRemoteMessage({
+        message: { name: 'Ada', is_user: false, mes: 'She nods.', extra: { stmp: { id: 'r2' } } },
+    });
+    bridge.endStream();
+    assert.equal(context.chat.length, 1);
+    assert.equal(context.chat[0].mes, 'She nods.');
+});
+
+await test('the same reply delivered twice is applied once', async () => {
+    const { bridge, context } = streamingClient();
+    const message = { name: 'Ada', is_user: false, mes: 'Once.', extra: { stmp: { id: 'dup' } } };
+    await bridge.applyRemoteMessage({ message });
+    await bridge.applyRemoteMessage({ message });
+    assert.equal(context.chat.length, 1, 'id de-duplication failed');
+});
+
+console.log('\nClient turns produce a reply');
+
+await test('accepting a player turn asks the model to answer', async () => {
+    // The reported symptom: a client could send a message and nothing happened,
+    // because the turn was appended and nothing triggered generation.
+    const commands = [];
+    const context = makeContext();
+    context.executeSlashCommandsWithOptions = async command => {
+        commands.push(command);
+        return { pipe: '' };
+    };
+    const { bridge } = makeBridge({ role: 'host', active: true, context });
+
+    await bridge.acceptRemoteTurn({ id: 't1', text: 'I open the door.', persona: { name: 'Casey' } }, { id: 'p2' });
+    await new Promise(resolve => setTimeout(resolve, 20));
+
+    assert.equal(commands.length, 1, 'no reply was requested');
+    assert.match(commands[0], /^\/trigger/, 'a reply should be triggered without adding another user message');
+});
+
+await test('auto-reply can be turned off', async () => {
+    const commands = [];
+    const context = makeContext();
+    context.executeSlashCommandsWithOptions = async command => { commands.push(command); return { pipe: '' }; };
+
+    const bridge = new ChatBridge({
+        getContext: () => context,
+        send: () => {},
+        role: () => 'host',
+        isActive: () => true,
+        autoReply: () => false,
+    });
+    bridge.attach();
+
+    await bridge.acceptRemoteTurn({ id: 't1', text: 'hello', persona: { name: 'Casey' } }, { id: 'p2' });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.deepEqual(commands, [], 'a reply was triggered with auto-reply disabled');
+});
+
+console.log('\nTyping indicators');
+
+const { TypingIndicators, IDLE_MS } = await import(path.join(root, 'lib/typing.js'));
+
+function indicators({ active = true, me = 'me' } = {}) {
+    const sent = [];
+    return {
+        sent,
+        typing: new TypingIndicators({
+            send: payload => sent.push(payload),
+            isActive: () => active,
+            peerId: () => me,
+        }),
+    };
+}
+
+await test('the idle window is three seconds', () => {
+    assert.equal(IDLE_MS, 3000);
+});
+
+await test('a remote notice names the player, and stopping clears it', () => {
+    const { typing } = indicators();
+    typing.receive({ from: 'p2', name: 'GreenHouse', typing: true });
+    assert.equal(typing.describe(), 'GreenHouse is typing…');
+
+    typing.receive({ from: 'p2', name: 'GreenHouse', typing: false });
+    assert.equal(typing.describe(), '');
+});
+
+await test('several players are summarised, not listed forever', () => {
+    const { typing } = indicators();
+    typing.receive({ from: 'p2', name: 'GreenHouse', typing: true });
+    assert.match(typing.describe(), /^GreenHouse is typing/);
+
+    typing.receive({ from: 'p3', name: 'Casey', typing: true });
+    assert.equal(typing.describe(), 'GreenHouse and Casey are typing…');
+
+    typing.receive({ from: 'p4', name: 'Riley', typing: true });
+    assert.equal(typing.describe(), 'GreenHouse, Casey and Riley are typing…');
+
+    typing.receive({ from: 'p5', name: 'Dee', typing: true });
+    assert.equal(typing.describe(), '4 players are typing…');
+});
+
+await test('my own notice is never shown back to me', () => {
+    const { typing } = indicators({ me: 'p1' });
+    typing.receive({ from: 'p1', name: 'Me', typing: true });
+    assert.equal(typing.describe(), '');
+});
+
+await test('a notice with no stamped author is ignored', () => {
+    // The relay stamps `from`, so an unstamped notice is malformed or forged.
+    const { typing } = indicators();
+    typing.receive({ name: 'Ghost', typing: true });
+    typing.receive({});
+    typing.receive(null);
+    assert.equal(typing.describe(), '');
+});
+
+await test('a departing player leaves no phantom indicator', () => {
+    const { typing } = indicators();
+    typing.receive({ from: 'p2', name: 'GreenHouse', typing: true });
+    typing.forget('p2');
+    assert.equal(typing.describe(), '');
+});
+
+await test('a stale indicator expires even with no stop notice', () => {
+    const { typing } = indicators();
+    typing.receive({ from: 'p2', name: 'GreenHouse', typing: true });
+    // Simulate a peer that crashed mid-sentence.
+    typing.active.get('p2').expiresAt = Date.now() - 1;
+    typing.reset();
+    assert.equal(typing.describe(), '');
+});
+
+await test('names are capped so the bar cannot be stretched', () => {
+    const { typing } = indicators();
+    typing.receive({ from: 'p2', name: 'n'.repeat(500), typing: true });
+    assert.ok(typing.describe().length < 80);
+});
+
 console.log(`\n${passed} passed, ${failed} failed\n`);
 process.exit(failed === 0 ? 0 : 1);

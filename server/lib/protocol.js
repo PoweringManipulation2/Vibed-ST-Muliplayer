@@ -176,7 +176,7 @@ export const TO_HOST_ONLY = new Set([
 export const ECHO_TO_SENDER = new Set([OP.OOC_MESSAGE]);
 
 /** Opcodes the relay stamps with the sender's name as well as its id. */
-export const STAMP_IDENTITY = new Set([OP.OOC_MESSAGE, OP.PERSONA_STATE]);
+export const STAMP_IDENTITY = new Set([OP.OOC_MESSAGE, OP.PERSONA_STATE, OP.CHAT_TYPING]);
 
 /** Caps for the out-of-character channel. Mirrors lib/protocol.js. */
 export const OOC = Object.freeze({

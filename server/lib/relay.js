@@ -730,6 +730,15 @@ export class Relay {
 
         if (op === OP.PERSONA_STATE) return this.#onPersona(peer, payload);
 
+        // Typing notices are ephemeral and peer-to-peer: relayed to everyone else
+        // with the author stamped, never stored and never echoed to the sender.
+        if (op === OP.CHAT_TYPING) {
+            return this.#broadcast(
+                { op: OP.CHAT_TYPING, from: peer.id, name: peer.name, typing: payload.typing !== false },
+                { except: peer.id },
+            );
+        }
+
         if (peer.role === ROLE.HOST) {
             // Host frames were forwarded verbatim, so anything identity-bearing
             // arrived anonymous. The roster keys personas by peer id, so the

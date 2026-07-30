@@ -573,6 +573,52 @@ await test('a departed player stops appearing in the persona cache', async () =>
     await shutdown(room.relay, room.host);
 });
 
+await test('typing notices are attributed and not echoed to the author', async () => {
+    const room = await bootRoom();
+    const a = await joinClient({ ...room, name: 'GreenHouse' });
+    const b = await joinClient({ ...room, name: 'Casey' });
+    await a.seen.waitForOp(OP.PARITY_RESULT);
+    await b.seen.waitForOp(OP.PARITY_RESULT);
+
+    a.client.send({ op: OP.CHAT_TYPING, typing: true });
+    const notice = await b.seen.waitForOp(OP.CHAT_TYPING);
+    assert.equal(notice.name, 'GreenHouse', 'the relay must stamp the player name');
+    assert.equal(notice.typing, true);
+    assert.ok(notice.from);
+
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.equal(a.seen.some(p => p?.op === OP.CHAT_TYPING), false, 'echoed back to the author');
+
+    await shutdown(room.relay, room.host, a.client, b.client);
+});
+
+await test('a client cannot forge a typing notice as another player', async () => {
+    const room = await bootRoom();
+    const a = await joinClient({ ...room, name: 'GreenHouse' });
+    const b = await joinClient({ ...room, name: 'Casey' });
+    await a.seen.waitForOp(OP.PARITY_RESULT);
+    await b.seen.waitForOp(OP.PARITY_RESULT);
+
+    a.client.send({ op: OP.CHAT_TYPING, typing: true, name: 'TheHost', from: 'fake-id' });
+    const notice = await b.seen.waitForOp(OP.CHAT_TYPING);
+    assert.equal(notice.name, 'GreenHouse');
+    assert.notEqual(notice.from, 'fake-id');
+
+    await shutdown(room.relay, room.host, a.client, b.client);
+});
+
+await test('the host can also be seen typing', async () => {
+    const room = await bootRoom();
+    const guest = await joinClient({ ...room, name: 'Casey' });
+    await guest.seen.waitForOp(OP.PARITY_RESULT);
+
+    room.host.send({ op: OP.CHAT_TYPING, typing: true });
+    const notice = await guest.seen.waitForOp(OP.CHAT_TYPING);
+    assert.equal(notice.name, 'TheHost');
+
+    await shutdown(room.relay, room.host, guest.client);
+});
+
 console.log('\nOut-of-character channel');
 
 await test('an OOC message reaches every peer, sender included', async () => {

@@ -247,6 +247,11 @@ wrong-version problem. In rough order of likelihood:
    WebSocket connections from an HTTPS page, so this is refused up front with an
    explanation rather than hanging.
 
+**Typing indicators.** While another player has the send box active you see
+"GreenHouse is typing…" above the composer, clearing three seconds after they
+stop. Only the started/stopped edges go on the wire, not keystrokes, and the
+relay stamps the author so nobody can type as somebody else.
+
 **Player chat.** The speech-bubble icon next to the send button opens and closes
 it, and carries an unread badge. Enter sends, Shift+Enter makes a new line.
 
@@ -339,13 +344,13 @@ not as protection against a determined attacker.
 
 ```bash
 node tests/interop.test.mjs   # 52 checks — browser and Node crypto agree
-node tests/e2e.test.mjs       # 36 checks — real relay, real sockets
+node tests/e2e.test.mjs       # 39 checks — real relay, real sockets
 node tests/ooc.test.mjs       # 25 checks — player chat cannot reach a prompt
 node tests/hunt.test.mjs      # 13 probes — adversarial; findings, not a gate
 node tests/portmap.test.mjs   # 16 checks — router protocols, parsing, SSRF guard
 node tests/sync.test.mjs      # 18 checks — extension sync actually installs things
 node tests/cards.test.mjs     # 19 checks — the card-sharing chain end to end
-node tests/session.test.mjs   # 15 checks — chat containment and persona payload
+node tests/session.test.mjs   # 39 checks — chat containment and persona payload
 ```
 
 `interop` matters because the key schedule and frame format are implemented
@@ -421,6 +426,38 @@ Seven bugs came out of writing these, all fixed:
 - Port-mapping discovery originally probed each candidate gateway in sequence, so
   hosting blocked for four and a half seconds before a code appeared. Candidates
   and protocols are now raced under a 2.6-second ceiling.
+- **A client's message produced no reply.** The turn was appended to the host's
+  chat and nothing ever asked the model to answer it, so a player could speak into
+  silence. The host now triggers a reply through `/trigger`, which generates
+  without adding another user message and waits for any generation already in
+  flight. There is a toggle for hosts who would rather several players act first.
+- **The reply appeared twice on clients.** Streaming tokens are coalesced on an
+  80ms timer, so one could be emitted *after* generation ended and after the
+  finished message had been delivered — at which point the receiver built a fresh
+  streaming placeholder holding the full text, which reads as a duplicate. The
+  timer is now cancelled when generation ends, and receivers refuse tokens outside
+  an active stream.
+- **Shared personas never reached the model.** Descriptions travelled to the host
+  and were stored, but nothing put them in front of the model — so it saw several
+  different speaker names and knew none of them, and replied as though talking to
+  one anonymous user. The host now injects every remote player's persona through
+  `setExtensionPrompt` at generation time, including lorebook entries whose
+  keywords appear in recent chat.
+- **Every remote player wore the receiver's own face.** A user message with no
+  `force_avatar` renders with the local persona picture, and a peer's avatar file
+  only exists on that peer's machine. Personas now carry a downscaled 96px data
+  URL, and remote turns set `force_avatar` from it.
+- **A chat turn overwrote the full persona.** Turns deliberately carry a
+  lightweight persona so they are not delayed by a lorebook read or a portrait
+  capture — but that partial payload replaced the complete one, so the portrait
+  and lorebook were discarded after the first message. Updates now merge.
+- **Nothing marked a message as another player's.** Same bubble, same styling,
+  only a different name. Remote messages now get a border and an "another player"
+  badge, applied defensively so a rendering failure can never break delivery.
+- **The shared roleplay used the host's original character and its existing
+  chat**, mixing a multiplayer session into a private history with nothing to
+  distinguish the two. The host now gets a dedicated session copy, marked as such,
+  created on first use; the original is never touched.
 - **Clients could never see the host's persona.** The relay forwarded host frames
   verbatim, so identity-bearing payloads arrived anonymous. The roster keys
   personas by peer id, so the host's own persona could not be matched to the host
@@ -505,6 +542,7 @@ lib/
   cards.js             stub cards, hydration, chunked avatars
   chat.js              chat relay
   ooc.js               player-only channel (never touches context.chat)
+  typing.js            per-player typing indicators
   ui.js                panel, cloud badges, sync dialog
 server/                ← linked into SillyTavern/plugins/st-multiplayer
   index.js             plugin entry: info / init / exit + control API

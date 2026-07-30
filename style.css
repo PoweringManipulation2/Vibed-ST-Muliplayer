@@ -633,3 +633,48 @@
     padding: 1px 9px;
     font-size: 0.8em;
 }
+
+/* ── remote player messages ──────────────────────────────────────────────── */
+
+#chat .mes.stmp-remote-message {
+    border-left: 2px solid var(--SmartThemeQuoteColor, #6fb3e0);
+}
+
+#chat .stmp-from-player {
+    margin-left: 8px;
+    padding: 1px 6px;
+    font-size: 0.68em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    vertical-align: middle;
+    white-space: nowrap;
+    border-radius: 8px;
+    color: var(--SmartThemeQuoteColor, #6fb3e0);
+    background-color: rgb(111 179 224 / 14%);
+    box-shadow: inset 0 0 0 1px rgb(111 179 224 / 35%);
+}
+
+/* ── typing indicators ───────────────────────────────────────────────────── */
+
+#stmp_typing_bar {
+    padding: 2px 12px 4px;
+    font-size: 0.78em;
+    font-style: italic;
+    opacity: 0;
+    color: var(--SmartThemeBodyColor);
+    transition: opacity 0.15s ease-out;
+    pointer-events: none;
+    /* Never let a long name push the composer around. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#stmp_typing_bar.stmp-typing-visible {
+    opacity: 0.6;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #stmp_typing_bar { transition: none; }
+}

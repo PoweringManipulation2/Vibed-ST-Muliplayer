@@ -65,6 +65,12 @@ const DEFAULT_SETTINGS = Object.freeze({
     autoReconnect: true,
     /** Avatar filenames the host has chosen to share. */
     sharedCards: [],
+    /**
+     * Whether a client's turn should make the host's model reply automatically.
+     * On by default — otherwise a client sends a message and nothing happens.
+     * Turn it off if you would rather several players act before the model does.
+     */
+    autoReply: true,
     /** Remembered player-chat panel geometry: {left, top, width, height, collapsed}. */
     oocPanel: {},
 });
@@ -122,7 +128,26 @@ function buildDeps() {
  * generation is aborted before a prompt is assembled.
  */
 globalThis.stmpGenerateInterceptor = async function stmpGenerateInterceptor(chat, _contextSize, abort, type) {
-    if (!session?.connected || session.role !== 'client') return;
+    if (!session?.connected) return;
+
+    // Host: this is the last moment before the prompt is assembled, which makes
+    // it the right place to put the other players' personas in front of the
+    // model. Without this the descriptions travelled and were stored but never
+    // reached a prompt, so the model saw several names and knew none of them.
+    if (session.role === 'host') {
+        if (session.inSessionChat()) {
+            try {
+                session.chat.injectPersonas();
+            } catch (error) {
+                console.error('[Multiplayer] Could not inject player personas', error);
+            }
+        } else {
+            session.chat.clearPersonaInjection();
+        }
+        return;
+    }
+
+    if (session.role !== 'client') return;
     if (type === 'quiet' || type === 'impersonate') return; // local-only helpers stay local
 
     const last = chat?.[chat.length - 1];
@@ -164,6 +189,12 @@ export async function init() {
         console.error('[Multiplayer] Failed to mount the player chat panel', error);
     }
 
+    try {
+        session.typing.mount();
+    } catch (error) {
+        console.error('[Multiplayer] Failed to mount the typing indicator', error);
+    }
+
     registerSlashCommands(deps);
 
     // Leaving a session cleanly on unload stops the relay from holding a dead
@@ -191,6 +222,7 @@ export async function onDelete() {
 async function teardown() {
     try { await session?.leave(); } catch { /* ignore */ }
     try { session?.ooc.destroy(); } catch { /* ignore */ }
+    try { session?.typing.destroy(); } catch { /* ignore */ }
     ui?.destroy();
     session = null;
     ui = null;
