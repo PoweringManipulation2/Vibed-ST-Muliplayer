@@ -310,9 +310,10 @@ not as protection against a determined attacker.
 ## Tests
 
 ```bash
-node tests/interop.test.mjs   # 25 checks — browser and Node crypto agree
+node tests/interop.test.mjs   # 35 checks — browser and Node crypto agree
 node tests/e2e.test.mjs       # 32 checks — real relay, real sockets
-node tests/ooc.test.mjs       # 14 checks — player chat cannot reach a prompt
+node tests/ooc.test.mjs       # 25 checks — player chat cannot reach a prompt
+node tests/hunt.test.mjs      # 13 probes — adversarial; findings, not a gate
 ```
 
 `interop` matters because the key schedule and frame format are implemented
@@ -329,7 +330,13 @@ capacity, kick, rotation and clean port release.
 `chatMetadata` and `setExtensionPrompt` are watched, and fails if anything lands
 in them. It also covers truncation, name spoofing, and malformed payloads.
 
-Four bugs came out of writing these, all fixed:
+`hunt` is deliberately adversarial: it fills the room with peers who can never be
+admitted, disconnects the host and reconnects, claims the host slot twice,
+abandons transfers, floods the rate limiter and runs a 5000-turn session looking
+for unbounded growth. It exits zero regardless, because its job is to surface
+findings rather than gate a release.
+
+Seven bugs came out of writing these, all fixed:
 
 - Frame handling is asynchronous, so an unserialised handler let the relay's
   `welcome` be processed before the `accepted` that installs the session keys —
@@ -353,6 +360,21 @@ Four bugs came out of writing these, all fixed:
   icon appeared to do nothing — the same "state behind a DOM guard" mistake as
   above, made a second time. Every state change in `openPanel` now happens above
   the guard, with a comment saying why.
+- Room capacity counted *every* connected peer rather than admitted ones, so
+  anyone held at the extension-parity gate occupied a seat. A group who all
+  needed to sync could fill the room and lock out someone who was ready to play,
+  with the host seeing only "room full". Capacity now counts admitted peers, and
+  the lobby has its own smaller cap.
+- Peers held in the lobby were never dropped. They answer heartbeats perfectly
+  well, so the liveness timeout could never remove them and their slot leaked for
+  the life of the room. There is now a 90-second lobby timeout.
+- Advertising a non-loopback address with "Allow players on my local network"
+  switched off is a guaranteed failure — the relay binds `127.0.0.1`, the code
+  looks correct, and every joiner hangs forever. Now refused up front with an
+  explanation.
+- `ChatBridge` remembered every message id for the life of the session purely to
+  detect echoes, which only ever arrive moments after sending. A long session
+  accumulated all of them; the sets are now bounded windows.
 
 ---
 

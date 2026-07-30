@@ -219,7 +219,7 @@ export class Relay {
 
         this.running = true;
         this.startedAt = Date.now();
-        this._sweeper = setInterval(() => this.#sweep(), 5000);
+        this._sweeper = setInterval(() => this.sweep(), 5000);
         this._sweeper.unref?.();
 
         this.log('info', `Relay listening on ${host}:${this.port} (room "${this.roomName}")`);
@@ -337,6 +337,8 @@ export class Relay {
             port: this.port,
             roomName: this.roomName,
             bindLan: this.bindLan,
+            /** What the socket is actually bound to, as opposed to what is advertised. */
+            boundTo: this.bindLan ? '0.0.0.0' : '127.0.0.1',
             uptimeMs: this.running ? Date.now() - this.startedAt : 0,
             maxPeers: this.maxPeers,
             requireParity: this.requireParity,
@@ -453,8 +455,17 @@ export class Relay {
             return;
         }
 
-        if (this.peers.size >= this.maxPeers) {
+        // Count admitted peers only. Using peers.size here meant anyone held at
+        // the extension-parity gate occupied a seat, so a group who all needed to
+        // sync would fill the room and lock out someone who was ready to play.
+        if (this.#admittedCount() >= this.maxPeers) {
             this.#rejectSocket(socket, REJECT_REASON.ROOM_FULL);
+            return;
+        }
+
+        // Separate, smaller cap so the lobby itself cannot be flooded.
+        if (this.#lobbyCount() >= LIMITS.MAX_LOBBY) {
+            this.#rejectSocket(socket, REJECT_REASON.RATE_LIMITED, 'too many peers are waiting to be admitted');
             return;
         }
 
@@ -850,8 +861,25 @@ export class Relay {
         }
     }
 
-    /** Drops silent peers and expires temporary IP blocks. */
-    #sweep() {
+    #admittedCount() {
+        let count = 0;
+        for (const peer of this.peers.values()) if (peer.admitted) count += 1;
+        return count;
+    }
+
+    #lobbyCount() {
+        let count = 0;
+        for (const peer of this.peers.values()) if (!peer.admitted) count += 1;
+        return count;
+    }
+
+    /**
+     * Drops silent peers, expires lobby waits, and clears temporary IP blocks.
+     *
+     * Public so tests can drive it directly: the intervals involved are tens of
+     * seconds, and a test that waits them out in real time is a test nobody runs.
+     */
+    sweep() {
         const now = Date.now();
 
         for (const peer of this.peers.values()) {
@@ -860,6 +888,21 @@ export class Relay {
                 try { peer.socket.close(4408, 'timeout'); } catch { /* already gone */ }
                 continue;
             }
+
+            // A peer that never gets admitted answers heartbeats forever, so a
+            // liveness timeout alone would never remove it. Expire the wait.
+            if (!peer.admitted && now - peer.joinedAt > LIMITS.LOBBY_TIMEOUT_MS) {
+                this.log('info', `Dropping ${peer.name || peer.id}: never admitted within ${Math.round(LIMITS.LOBBY_TIMEOUT_MS / 1000)}s`);
+                void this.#send(peer, {
+                    op: OP.ERROR,
+                    message: 'Timed out waiting to be admitted. Sync your extensions if needed, then rejoin.',
+                });
+                setTimeout(() => {
+                    try { peer.socket.close(4403, 'not admitted'); } catch { /* already gone */ }
+                }, 200);
+                continue;
+            }
+
             if (now - peer.lastSeen > LIMITS.PING_INTERVAL_MS) {
                 void this.#send(peer, { op: OP.PING, t: now });
             }
