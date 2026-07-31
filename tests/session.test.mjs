@@ -475,9 +475,11 @@ await test('the same reply delivered twice is applied once', async () => {
 
 console.log('\nClient turns produce a reply');
 
-await test('accepting a player turn asks the model to answer', async () => {
-    // The reported symptom: a client could send a message and nothing happened,
-    // because the turn was appended and nothing triggered generation.
+await test('a player turn on its own never triggers a reply', async () => {
+    // Guided Generations' Simple Send is `/send {{input}} | /setinput`: it appends
+    // a user message and fires MESSAGE_SENT exactly like a normal send, so a turn
+    // arriving cannot mean "answer this". Inferring it here is what made Simple
+    // Send always trigger the model.
     const commands = [];
     const context = makeContext();
     context.executeSlashCommandsWithOptions = async command => {
@@ -489,11 +491,147 @@ await test('accepting a player turn asks the model to answer', async () => {
     await bridge.acceptRemoteTurn({ id: 't1', text: 'I open the door.', persona: { name: 'Casey' } }, { id: 'p2' });
     await new Promise(resolve => setTimeout(resolve, 20));
 
+    assert.deepEqual(commands, [], 'appending a turn must not start a generation');
+    assert.equal(context.chat.length, 1, 'the turn should still be appended');
+});
+
+await test('an explicit generation request asks the model to answer', async () => {
+    // The client's generate_interceptor only runs when SillyTavern was genuinely
+    // about to generate, so this is the signal a normal send produces and Simple
+    // Send does not.
+    const commands = [];
+    const context = makeContext();
+    context.executeSlashCommandsWithOptions = async command => {
+        commands.push(command);
+        return { pipe: '' };
+    };
+    const { bridge } = makeBridge({ role: 'host', active: true, context });
+
+    await bridge.handleGenerationRequest({ id: 'p2', name: 'Casey' });
+    await new Promise(resolve => setTimeout(resolve, 20));
+
     assert.equal(commands.length, 1, 'no reply was requested');
     assert.match(commands[0], /^\/trigger/, 'a reply should be triggered without adding another user message');
 });
 
-await test('auto-reply can be turned off', async () => {
+await test('a client forwards its generation intent instead of generating', () => {
+    const { bridge, sent } = makeBridge({ role: 'client', active: true });
+    bridge.requestGenerationFromHost(undefined);
+
+    const request = sent.find(payload => payload.op === 'gen.request');
+    assert.ok(request, 'the client never asked the host for a reply');
+    assert.equal(request.genType, 'normal', 'an untyped generation should normalise');
+});
+
+console.log('\nPortraits survive the turns that follow them');
+
+const PORTRAIT = 'data:image/webp;base64,UklGRhoAAABXRUJQ';
+
+await test('a turn without a portrait keeps the one already published', () => {
+    // PERSONA_STATE delivers the portrait at admission; every CHAT_TURN after it
+    // carries a lightweight persona. Those updates must merge, not replace.
+    const { bridge } = makeBridge({ role: 'host' });
+    bridge.rememberPersona('p2', { name: 'Casey', avatarData: PORTRAIT });
+    bridge.rememberPersona('p2', { name: 'Casey' });
+
+    assert.equal(bridge.personas.get('p2').avatarData, PORTRAIT, 'the portrait was lost');
+});
+
+await test('an explicit null does not clear a published portrait', () => {
+    // The exact regression: #localPersona() used to emit `avatarData: null`, and
+    // rememberPersona() only preserved the previous value when the field was
+    // undefined — so the first message destroyed the portrait and every remote
+    // message fell back to the receiver's own persona picture.
+    const { bridge } = makeBridge({ role: 'host' });
+    bridge.rememberPersona('p2', { name: 'Casey', avatarData: PORTRAIT });
+    bridge.rememberPersona('p2', { name: 'Casey', avatarData: null });
+
+    assert.equal(bridge.personas.get('p2').avatarData, PORTRAIT, 'a null wiped the portrait');
+});
+
+await test('a malformed portrait is rejected without destroying the good one', () => {
+    const { bridge } = makeBridge({ role: 'host' });
+    bridge.rememberPersona('p2', { name: 'Casey', avatarData: PORTRAIT });
+    bridge.rememberPersona('p2', { name: 'Casey', avatarData: 'https://example.invalid/x.png' });
+
+    assert.equal(bridge.personas.get('p2').avatarData, PORTRAIT, 'a bad value should be ignored, not applied');
+});
+
+await test('a remote turn renders with that player\'s own face', async () => {
+    const context = makeContext();
+    const { bridge } = makeBridge({ role: 'host', active: true, context });
+    bridge.rememberPersona('p2', { name: 'Casey', avatarData: PORTRAIT });
+
+    await bridge.acceptRemoteTurn({ id: 't1', text: 'I open the door.', persona: { name: 'Casey' } }, { id: 'p2' });
+
+    const message = context.chat.at(-1);
+    assert.equal(message.force_avatar, PORTRAIT, 'without force_avatar the host\'s own persona picture is used');
+});
+
+await test('the host\'s own message carries a portrait peers can render', () => {
+    // The mirror of the reported bug. SillyTavern stamps a LOCAL thumbnail URL on
+    // your own messages, naming a file only your machine has — so forwarding it
+    // verbatim meant every peer stripped it and rendered the host wearing their
+    // own persona picture.
+    const { sent, context, fire } = makeBridge({ role: 'host', active: true });
+
+    context.chat.push({
+        name: 'Legoshi',
+        is_user: true,
+        mes: 'I lie still on the ground.',
+        force_avatar: '/thumbnail?type=persona&file=1774920536592-Legoshi.png',
+        extra: {},
+    });
+    fire('ms', 0);
+
+    const append = sent.find(payload => payload.op === 'chat.append');
+    assert.ok(append, 'the message was never broadcast');
+    assert.ok(
+        !String(append.message.force_avatar ?? '').includes('/thumbnail'),
+        'a local thumbnail URL must never be forwarded — it cannot resolve on any other machine',
+    );
+    assert.ok(
+        !append.message.force_avatar || append.message.force_avatar.startsWith('data:image/'),
+        'only self-contained data URLs are portable between peers',
+    );
+});
+
+await test('a rebroadcast player turn keeps that player\'s portrait', async () => {
+    const context = makeContext();
+    const { bridge, sent } = makeBridge({ role: 'host', active: true, context });
+    bridge.rememberPersona('p2', { name: 'Casey', avatarData: PORTRAIT });
+
+    await bridge.acceptRemoteTurn({ id: 't9', text: 'I get up.', persona: { name: 'Casey' } }, { id: 'p2' });
+
+    const append = sent.find(payload => payload.op === 'chat.append');
+    assert.equal(append.message.force_avatar, PORTRAIT, 'the player\'s face was lost on rebroadcast');
+});
+
+await test('a delete with an unknown id does not remove someone else\'s message', () => {
+    const { bridge, context } = makeBridge({ role: 'client', active: true });
+    context.chat.push({ name: 'Ada', mes: 'first', extra: { stmp: { id: 'a' } } });
+    context.chat.push({ name: 'Casey', mes: 'second', extra: { stmp: { id: 'b' } } });
+
+    // Diverged view: the id is real elsewhere but absent here. Falling back to the
+    // index deleted whatever happened to sit at that position.
+    bridge.applyRemoteDelete({ id: 'not-here', index: 0 });
+
+    assert.equal(context.chat.length, 2, 'an unmatched id must delete nothing');
+});
+
+await test('a client turn omits avatarData rather than sending null', () => {
+    // Belt and braces for the same bug from the sending side: even a host that
+    // still had the old merge logic would not be poisoned by this payload.
+    const { sent, context, fire } = makeBridge({ role: 'client', active: true });
+    context.chat.push({ name: 'Casey', is_user: true, mes: 'I open the door.', extra: {} });
+    fire('ms', 0);
+
+    const turn = sent.find(payload => payload.op === 'chat.turn');
+    assert.ok(turn, 'the turn was never forwarded');
+    assert.ok(!('avatarData' in turn.persona), 'avatarData must be absent, not null');
+});
+
+await test('auto-reply off ignores generation requests', async () => {
     const commands = [];
     const context = makeContext();
     context.executeSlashCommandsWithOptions = async command => { commands.push(command); return { pipe: '' }; };
@@ -507,7 +645,7 @@ await test('auto-reply can be turned off', async () => {
     });
     bridge.attach();
 
-    await bridge.acceptRemoteTurn({ id: 't1', text: 'hello', persona: { name: 'Casey' } }, { id: 'p2' });
+    await bridge.handleGenerationRequest({ id: 'p2', name: 'Casey' });
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.deepEqual(commands, [], 'a reply was triggered with auto-reply disabled');
 });

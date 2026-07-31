@@ -9,7 +9,7 @@
         "node": ">=18"
     },
     "peerDependencies": {
-        "ws": "^8.18.0"
+        "ws": "^8.21.1"
     },
     "comment": "ws ships with SillyTavern 1.13+ and resolves from the parent node_modules. If your install predates that, run `npm install ws` in the SillyTavern root."
 }

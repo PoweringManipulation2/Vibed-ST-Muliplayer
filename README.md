@@ -131,6 +131,16 @@ triggering a reply, so several players can act before the model answers. Guided
 Generations already provides that button, and duplicating it would just mean two
 buttons doing the same job.
 
+Making that work took a protocol split, because Simple Send is indistinguishable
+from a normal send on the wire — both append a user message and both fire
+`MESSAGE_SENT`. A client therefore sends the text (`chat.turn`) and the intent to
+generate (`gen.request`) as separate messages, and the host only ever answers the
+second. The intent comes from the client's `generate_interceptor`, which
+SillyTavern runs *only* when it is genuinely about to generate, so Simple Send
+never produces one and no enumeration of Guided Generations' tools is required —
+its Thinking, Clothes and State guides, and anything added later, all behave
+correctly for free.
+
 One caveat about how ST resolves dependencies: the name it matches is the
 *folder* name, not anything inside Guided Generations' own manifest. Installing
 from the URL above produces `GuidedGenerations-Extension`, which is what's

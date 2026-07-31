@@ -157,8 +157,18 @@ globalThis.stmpGenerateInterceptor = async function stmpGenerateInterceptor(chat
 
     const last = chat?.[chat.length - 1];
     if (last?.is_user) {
-        // ChatBridge already forwarded this on MESSAGE_SENT; abort so the
-        // client does not also hit its own API with a half-synced context.
+        // Reaching this point IS the intent signal. SillyTavern only runs an
+        // interceptor when it is genuinely about to generate, so Simple Send —
+        // which is `/send {{input}} | /setinput` and never generates — never gets
+        // here. ChatBridge already forwarded the text on MESSAGE_SENT; this asks
+        // for the reply that the text alone must not imply.
+        try {
+            session.chat.requestGenerationFromHost(type);
+        } catch (error) {
+            console.error('[Multiplayer] Could not ask the host for a reply', error);
+        }
+        // Abort so the client does not also hit its own API with a half-synced
+        // context.
         abort(true);
         globalThis.toastr?.info('Sent to the host — their model will answer for the room.', 'Multiplayer');
         return;

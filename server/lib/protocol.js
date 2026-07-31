@@ -8,7 +8,7 @@
  * =====================================================================
  */
 
-export const PROTOCOL_REVISION = 'STMP/1.0.0';
+export const PROTOCOL_REVISION = 'STMP/1.1.0';
 
 export const FRAME_VERSION = 0x01;
 export const HEADER_SIZE = 10;
@@ -101,6 +101,15 @@ export const OP = Object.freeze({
     CHAT_EDIT: 'chat.edit',
     CHAT_DELETE: 'chat.delete',
 
+    /**
+     * Client -> host: the turn I just sent was meant to produce a reply.
+     * Sent from the client's generate_interceptor, which only runs when
+     * SillyTavern was genuinely about to generate — the only reliable signal,
+     * since a normal send and Guided Generations' Simple Send are identical on
+     * the wire. Never infer this from CHAT_TURN.
+     */
+    GEN_REQUEST: 'gen.request',
+
     GEN_START: 'gen.start',
     GEN_TOKEN: 'gen.token',
     GEN_END: 'gen.end',
@@ -158,6 +167,8 @@ export const CLIENT_ALLOWED_OPS = new Set([
     OP.OOC_MESSAGE, OP.OOC_TYPING,
     OP.PARITY_URLS_REQUEST,
     OP.SESSION_JOIN,
+    // Asking for a reply is a client's whole purpose in the room.
+    OP.GEN_REQUEST,
     // Personas are peer-to-peer: everyone should be able to see who everyone
     // else is playing, not only the host.
     OP.PERSONA_STATE,
@@ -166,6 +177,8 @@ export const CLIENT_ALLOWED_OPS = new Set([
 /** Opcodes the relay forwards to the host only, rather than broadcasting. */
 export const TO_HOST_ONLY = new Set([
     OP.CARDS_WANT, OP.CHAT_TURN, OP.PARITY_URLS_REQUEST, OP.SESSION_JOIN,
+    // Only the host owns an API connection, so only the host can act on this.
+    OP.GEN_REQUEST,
 ]);
 
 /**
