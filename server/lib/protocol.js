@@ -8,7 +8,7 @@
  * =====================================================================
  */
 
-export const PROTOCOL_REVISION = 'STMP/1.1.0';
+export const PROTOCOL_REVISION = 'STMP/1.2.0';
 
 export const FRAME_VERSION = 0x01;
 export const HEADER_SIZE = 10;
@@ -110,6 +110,17 @@ export const OP = Object.freeze({
      */
     GEN_REQUEST: 'gen.request',
 
+    /**
+     * Host -> peers: a reply is coming, and who asked for it.
+     *
+     * Purely advisory and never written to the chat. It exists because in a
+     * shared room the seconds between someone pressing send and the first token
+     * arriving are invisible to everyone else, so two players routinely type over
+     * each other. Phases: 'pending' (accepted, not started), 'running'
+     * (generating), 'done'.
+     */
+    GEN_NOTICE: 'gen.notice',
+
     GEN_START: 'gen.start',
     GEN_TOKEN: 'gen.token',
     GEN_END: 'gen.end',
@@ -172,6 +183,12 @@ export const CLIENT_ALLOWED_OPS = new Set([
     // Personas are peer-to-peer: everyone should be able to see who everyone
     // else is playing, not only the host.
     OP.PERSONA_STATE,
+    // Correcting the transcript. The client has always sent these and the host
+    // has always known how to apply and rebroadcast them — they were simply never
+    // allowed through, so a client's edit or delete applied locally, reached
+    // nobody, and left that peer quietly out of step with the room.
+    OP.CHAT_EDIT,
+    OP.CHAT_DELETE,
 ]);
 
 /** Opcodes the relay forwards to the host only, rather than broadcasting. */
@@ -179,6 +196,11 @@ export const TO_HOST_ONLY = new Set([
     OP.CARDS_WANT, OP.CHAT_TURN, OP.PARITY_URLS_REQUEST, OP.SESSION_JOIN,
     // Only the host owns an API connection, so only the host can act on this.
     OP.GEN_REQUEST,
+    // The host owns the canonical transcript, so it applies the change and
+    // rebroadcasts it. Broadcasting directly would let two peers edit the same
+    // message into different states with nothing to reconcile them.
+    OP.CHAT_EDIT,
+    OP.CHAT_DELETE,
 ]);
 
 /**

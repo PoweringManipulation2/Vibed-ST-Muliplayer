@@ -693,3 +693,55 @@
 #stmp_settings .stmp-prompt-state.stmp-prompt-warn {
     border-left-color: #e0a52a;
 }
+
+/* ---------------------------------------------------------------------------
+ * Generation notice
+ *
+ * Sits above the transcript rather than above the composer, where the typing
+ * indicator lives — this is about the state of the room, not the state of your
+ * own text box, and two bars on the send form would compete for the same glance.
+ *
+ * Sticky so it stays visible while scrolling back through history: someone
+ * reading earlier messages is exactly the person about to type into a reply
+ * that has already started.
+ * ------------------------------------------------------------------------- */
+
+#stmp_generation_bar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    margin: 0 auto 4px;
+    padding: 5px 12px;
+    max-width: 100%;
+    border-radius: 4px;
+    border-left: 3px solid var(--SmartThemeQuoteColor, #6b9dd6);
+    background-color: var(--black50a, rgba(0, 0, 0, 0.5));
+    color: var(--SmartThemeBodyColor);
+    font-size: 0.82em;
+    line-height: 1.4;
+    opacity: 0;
+    transition: opacity 0.15s ease-out;
+    pointer-events: none;
+    /* A long persona name must not reflow the chat. */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#stmp_generation_bar.stmp-generation-visible {
+    opacity: 0.92;
+}
+
+/* Generating draws slightly more attention than merely queued: this is the
+ * state in which sending a turn actively damages the reply. */
+#stmp_generation_bar.stmp-generation-running {
+    border-left-color: var(--golden, #d6a83a);
+}
+
+#stmp_generation_bar[hidden] {
+    display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #stmp_generation_bar { transition: none; }
+}

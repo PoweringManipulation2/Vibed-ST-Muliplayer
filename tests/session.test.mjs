@@ -306,7 +306,12 @@ await test('remote persona descriptions actually reach the prompt', () => {
     assert.equal(injected.length, 1, 'nothing was registered as an extension prompt');
     assert.match(text, /Casey: A tired archivist who distrusts machines\./);
     assert.match(text, /Riley: A weary captain\./);
-    assert.equal(injected[0].position, 0, 'should be injected in-prompt');
+    // IN_CHAT (1) at a depth, not IN_PROMPT (0). Injected once near the top of a
+    // long prompt, the multiplayer rules sit thousands of tokens behind the action
+    // and the model drifts back into writing everyone's turns; injected a few
+    // messages from the end, they are re-read on every generation.
+    assert.equal(injected[0].position, 1, 'should be injected in-chat, not in-prompt');
+    assert.ok(injected[0].depth > 0, 'an in-chat injection needs a depth to sit at');
 });
 
 await test('lorebook content is handed to World Info, not inlined here', () => {
@@ -605,6 +610,39 @@ await test('a rebroadcast player turn keeps that player\'s portrait', async () =
 
     const append = sent.find(payload => payload.op === 'chat.append');
     assert.equal(append.message.force_avatar, PORTRAIT, 'the player\'s face was lost on rebroadcast');
+});
+
+await test('a remote edit is written to disk, not just to the screen', async () => {
+    // Only the in-memory array was touched, so on the host — whose transcript is
+    // what late joiners are sent — the correction vanished on the next reload and
+    // silently reappeared for the whole room.
+    let saved = 0;
+    const context = makeContext();
+    context.saveChat = async () => { saved++; };
+    context.updateMessageBlock = () => {};
+    const { bridge } = makeBridge({ role: 'host', active: true, context });
+
+    context.chat.push({ name: 'Casey', mes: 'teh door', extra: { stmp: { id: 'e1' } } });
+    bridge.applyRemoteEdit({ id: 'e1', text: 'the door' });
+
+    assert.equal(context.chat[0].mes, 'the door');
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.ok(saved > 0, 'the edit was never persisted');
+});
+
+await test('a remote delete is written to disk too', async () => {
+    let saved = 0;
+    const context = makeContext();
+    context.saveChat = async () => { saved++; };
+    context.printMessages = () => {};
+    const { bridge } = makeBridge({ role: 'host', active: true, context });
+
+    context.chat.push({ name: 'Casey', mes: 'oops', extra: { stmp: { id: 'd1' } } });
+    bridge.applyRemoteDelete({ id: 'd1', index: 0 });
+
+    assert.equal(context.chat.length, 0);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.ok(saved > 0, 'the deletion was never persisted');
 });
 
 await test('a delete with an unknown id does not remove someone else\'s message', () => {

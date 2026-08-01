@@ -131,6 +131,14 @@ triggering a reply, so several players can act before the model answers. Guided
 Generations already provides that button, and duplicating it would just mean two
 buttons doing the same job.
 
+The room also gets a banner above the transcript saying who asked for a reply and
+whether it has started. In a single-player chat the state of the model is obvious
+— you pressed send, so you know something is coming — but in a shared room it is
+invisible, and everyone else keeps typing into a reply that is already being
+written. The turn then lands after the reply and reads as a non-sequitur. The
+typing indicator does not cover this: it says who is *composing*, which stops at
+the moment the interesting part begins.
+
 Making that work took a protocol split, because Simple Send is indistinguishable
 from a normal send on the wire — both append a user message and both fire
 `MESSAGE_SENT`. A client therefore sends the text (`chat.turn`) and the intent to
