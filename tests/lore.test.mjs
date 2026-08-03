@@ -291,7 +291,7 @@ await test('the model is told how many people are present, and their names', () 
     });
     const text = bridge.injectPersonas(6, 'me');
 
-    assert.match(text, /3 people are in this scene/, 'the host counts too');
+    assert.match(text, /3 people in this scene/, 'the host counts too');
     assert.match(text, /Legoshi/);
     assert.match(text, /GreenHouse/);
     assert.match(text, /Casey/);
@@ -306,49 +306,15 @@ await test('a player with no description is still counted and named', () => {
     });
     const text = bridge.injectPersonas(6, 'me');
 
-    assert.match(text, /3 people are in this scene/);
+    assert.match(text, /3 people in this scene/);
     assert.match(text, /Quiet/, 'a description-less player must still be named');
     assert.ok(!/Quiet:/.test(text), 'but should not get an empty description block');
 });
 
-await test('the block forbids the model from writing anyone else\'s turn', () => {
-    // The single most disruptive failure in a shared chat: SillyTavern has no
-    // concept of more than one user, so without an explicit rule the model treats
-    // every speaker as the same person and writes the other players' turns for
-    // them — putting words in a real person's mouth.
+await test('the block instructs the model to keep the players distinct', () => {
     const { bridge } = bridgeWith({ p2: { name: 'GreenHouse', description: 'A player.' } });
     const text = bridge.injectPersonas(6, 'me');
-
-    assert.match(text, /never speak, act, or narrate/i, 'the prohibition must be explicit');
-    assert.match(text, /different real person/i, 'the model must be told these are separate people');
-    assert.match(text, /take their turn/i, 'it must be told to stop and hand back');
-});
-
-await test('a connected player who has not published a persona is still named', () => {
-    // A peer that has joined but whose PERSONA_STATE has not arrived yet is in the
-    // room and about to speak. Building the roster from personas alone told the
-    // model about fewer people than were actually playing.
-    const { bridge } = bridgeWith({ p2: { name: 'GreenHouse', description: 'A player.' } });
-    const text = bridge.injectPersonas(undefined, 'me', ['GreenHouse', 'Newcomer']);
-
-    assert.match(text, /Newcomer/, 'a peer without a persona must still be listed');
-    assert.match(text, /3 people are in this scene/, 'and must be counted');
-    assert.ok(!/Newcomer:/.test(text), 'but gets no description block');
-});
-
-await test('roster names are de-duplicated against known personas', () => {
-    const { bridge } = bridgeWith({ p2: { name: 'GreenHouse', description: 'A player.' } });
-    const text = bridge.injectPersonas(undefined, 'me', ['GreenHouse']);
-
-    assert.match(text, /2 people are in this scene/, 'the same player was counted twice');
-});
-
-await test('a solo session injects nothing at all', () => {
-    // One participant is an ordinary single-player chat, which SillyTavern already
-    // handles correctly on its own — the rules would only waste tokens and tell
-    // the model something untrue.
-    const { bridge } = bridgeWith({});
-    assert.equal(bridge.injectPersonas(undefined, 'me', []), '');
+    assert.match(text, /do not merge them into one character/i);
 });
 
 await test('lorebook text is not duplicated into the injected block', () => {

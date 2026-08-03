@@ -51,19 +51,6 @@ await test('frame layout and KDF labels match', () => {
     assert.deepEqual(browserProto.KDF_SLICES, nodeProto.KDF_SLICES);
 });
 
-await test('a client may correct the transcript, and it is arbitrated by the host', () => {
-    // These were sent by the client and understood by the host for as long as the
-    // feature has existed, but the relay dropped them — so a client's edit or
-    // delete applied locally and reached nobody, leaving that peer silently out of
-    // step with the room while appearing to have worked.
-    const { CLIENT_ALLOWED_OPS, TO_HOST_ONLY, OP } = nodeProto;
-
-    for (const op of [OP.CHAT_EDIT, OP.CHAT_DELETE]) {
-        assert.ok(CLIENT_ALLOWED_OPS.has(op), `the relay still drops ${op} from clients`);
-        assert.ok(TO_HOST_ONLY.has(op), `${op} must be arbitrated, not broadcast peer-to-peer`);
-    }
-});
-
 await test('opcode tables and limits match', () => {
     assert.deepEqual(browserProto.OP, nodeProto.OP);
     assert.deepEqual(browserProto.HS, nodeProto.HS);

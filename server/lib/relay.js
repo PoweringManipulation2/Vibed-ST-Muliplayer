@@ -818,10 +818,7 @@ export class Relay {
         }
 
         // ECHO_TO_SENDER: the author gets it back too, so ordering is uniform.
-        // Ask about the opcode in hand, not a hardcoded one — this read as
-        // `has(OP.OOC_MESSAGE)`, which is a constant `true` and silently ignores
-        // the set it is pretending to consult.
-        const echo = ECHO_TO_SENDER.has(message.op);
+        const echo = ECHO_TO_SENDER.has(OP.OOC_MESSAGE);
         return this.#broadcast(message, echo ? {} : { except: peer.id });
     }
 

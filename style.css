@@ -558,32 +558,6 @@
     font-size: 0.8em;
 }
 
-/* ── persona profiles ────────────────────────────────────────────────────── */
-
-.stmp-persona-profile .stmp-persona-text,
-.stmp-persona-profile .stmp-persona-lore {
-    margin-top: 4px;
-    padding: 8px;
-    max-height: 30vh;
-    overflow-y: auto;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    border-radius: 4px;
-    background-color: var(--black30a);
-}
-
-.stmp-persona-profile .stmp-persona-lore {
-    font-family: var(--monoFontFamily, monospace);
-    font-size: 0.82em;
-    line-height: 1.5;
-}
-
-#stmp_settings .stmp-persona {
-    padding: 0 7px;
-    margin: 0;
-    line-height: 1.6;
-}
-
 /* ── shared session panel ────────────────────────────────────────────────── */
 
 #stmp_settings .stmp-session-state {
@@ -694,54 +668,235 @@
     border-left-color: #e0a52a;
 }
 
-/* ---------------------------------------------------------------------------
- * Generation notice
- *
- * Sits above the transcript rather than above the composer, where the typing
- * indicator lives — this is about the state of the room, not the state of your
- * own text box, and two bars on the send form would compete for the same glance.
- *
- * Sticky so it stays visible while scrolling back through history: someone
- * reading earlier messages is exactly the person about to type into a reply
- * that has already started.
- * ------------------------------------------------------------------------- */
+/* ══════════════════════════════════════════════════════════════════════════
+   Persona profiles
 
-#stmp_generation_bar {
-    position: sticky;
-    top: 0;
-    z-index: 30;
-    margin: 0 auto 4px;
-    padding: 5px 12px;
-    max-width: 100%;
-    border-radius: 4px;
-    border-left: 3px solid var(--SmartThemeQuoteColor, #6b9dd6);
-    background-color: var(--black50a, rgba(0, 0, 0, 0.5));
-    color: var(--SmartThemeBodyColor);
-    font-size: 0.82em;
-    line-height: 1.4;
-    opacity: 0;
-    transition: opacity 0.15s ease-out;
-    pointer-events: none;
-    /* A long persona name must not reflow the chat. */
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+   Rebuilt from a single centred scroll box, which was unreadable with a
+   64-entry lorebook. Left-aligned throughout, keys as the headline, content
+   collapsed behind them, and a search box because scrolling 64 entries to find
+   one is not a plan.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.stmp-profile {
+    text-align: left;
+    max-height: 72vh;
+    overflow-y: auto;
+    padding-right: 4px;
 }
 
-#stmp_generation_bar.stmp-generation-visible {
-    opacity: 0.92;
+.stmp-profile-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-bottom: 12px;
+    margin-bottom: 4px;
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
 }
 
-/* Generating draws slightly more attention than merely queued: this is the
- * state in which sending a turn actively damages the reply. */
-#stmp_generation_bar.stmp-generation-running {
-    border-left-color: var(--golden, #d6a83a);
+.stmp-profile-avatar {
+    width: 56px;
+    height: 56px;
+    flex-shrink: 0;
+    border-radius: 8px;
+    object-fit: cover;
+    box-shadow: 0 0 0 1px var(--SmartThemeBorderColor);
 }
 
-#stmp_generation_bar[hidden] {
+.stmp-profile-avatar-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.5em;
+    font-weight: 600;
+    opacity: 0.5;
+    background-color: var(--black30a);
+}
+
+.stmp-profile-name {
+    font-size: 1.15em;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.stmp-profile-sub {
+    font-size: 0.85em;
+    opacity: 0.65;
+}
+
+.stmp-profile-section {
+    margin-top: 16px;
+}
+
+.stmp-profile-label {
+    font-size: 0.72em;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    opacity: 0.5;
+    margin-bottom: 5px;
+}
+
+.stmp-profile-desc {
+    padding: 9px 11px;
+    border-radius: 5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    background-color: var(--black30a);
+    border-left: 2px solid var(--SmartThemeBorderColor);
+}
+
+.stmp-profile-empty {
+    opacity: 0.5;
+    font-style: italic;
+}
+
+/* ── lorebook ─────────────────────────────────────────────────────────── */
+
+.stmp-profile-lorehead {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.stmp-profile-bookname {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.stmp-profile-search {
+    width: 100%;
+    margin-bottom: 8px;
+    font-size: 0.9em;
+}
+
+.stmp-profile-entries {
+    max-height: 42vh;
+    overflow-y: auto;
+    border: 1px solid var(--SmartThemeBorderColor);
+    border-radius: 5px;
+}
+
+.stmp-lore-entry {
+    border-bottom: 1px solid var(--SmartThemeBorderColor);
+}
+
+.stmp-lore-entry:last-of-type {
+    border-bottom: none;
+}
+
+.stmp-lore-entry > summary {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 7px 10px;
+    cursor: pointer;
+    list-style: none;
+    font-size: 0.88em;
+}
+
+.stmp-lore-entry > summary::-webkit-details-marker {
     display: none;
 }
 
-@media (prefers-reduced-motion: reduce) {
-    #stmp_generation_bar { transition: none; }
+.stmp-lore-entry > summary::before {
+    content: "\25b8";
+    flex-shrink: 0;
+    opacity: 0.45;
+    transition: transform 0.12s ease-out;
+}
+
+.stmp-lore-entry[open] > summary::before {
+    transform: rotate(90deg);
+}
+
+.stmp-lore-entry > summary:hover {
+    background-color: var(--white20a, rgb(255 255 255 / 6%));
+}
+
+.stmp-lore-keys {
+    font-family: var(--monoFontFamily, monospace);
+    font-size: 0.92em;
+    font-weight: 600;
+    color: var(--SmartThemeQuoteColor, #6fb3e0);
+    /* Long key lists must not push the preview off the row. */
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.stmp-lore-preview {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.92em;
+}
+
+.stmp-lore-entry[open] .stmp-lore-preview {
+    display: none;
+}
+
+.stmp-lore-body {
+    padding: 2px 12px 10px 26px;
+    font-size: 0.88em;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.stmp-lore-secondary {
+    padding: 0 12px 8px 26px;
+    font-size: 0.78em;
+}
+
+.stmp-lore-disabled {
+    opacity: 0.45;
+}
+
+.stmp-profile-foot {
+    margin-top: 14px;
+    padding-top: 10px;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+    font-size: 0.8em;
+}
+
+/* ── chips ────────────────────────────────────────────────────────────── */
+
+.stmp-chip {
+    flex-shrink: 0;
+    padding: 1px 7px;
+    border-radius: 9px;
+    font-size: 0.72em;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.stmp-chip-on {
+    color: #7fc47f;
+    background-color: rgb(127 196 127 / 14%);
+    box-shadow: inset 0 0 0 1px rgb(127 196 127 / 35%);
+}
+
+.stmp-chip-off {
+    color: #b0b0b0;
+    background-color: rgb(176 176 176 / 12%);
+    box-shadow: inset 0 0 0 1px rgb(176 176 176 / 28%);
+}
+
+.stmp-chip-always {
+    color: #e0bb5c;
+    background-color: rgb(224 187 92 / 14%);
+    box-shadow: inset 0 0 0 1px rgb(224 187 92 / 35%);
+}
+
+@media (width <= 600px) {
+    .stmp-lore-keys { max-width: 60%; }
+    .stmp-lore-preview { display: none; }
 }

@@ -142,14 +142,7 @@ globalThis.stmpGenerateInterceptor = async function stmpGenerateInterceptor(chat
     if (session.role === 'host') {
         if (session.inSessionChat()) {
             try {
-                // The roster is passed so peers who have connected but not yet
-                // published a persona are still named. Otherwise the model is told
-                // about fewer people than are actually in the room.
-                session.chat.injectPersonas(
-                    undefined,
-                    session.peerId,
-                    (session.peers ?? []).map(peer => peer?.name).filter(Boolean),
-                );
+                session.chat.injectPersonas(6, session.peerId);
             } catch (error) {
                 console.error('[Multiplayer] Could not inject player personas', error);
             }
@@ -164,18 +157,8 @@ globalThis.stmpGenerateInterceptor = async function stmpGenerateInterceptor(chat
 
     const last = chat?.[chat.length - 1];
     if (last?.is_user) {
-        // Reaching this point IS the intent signal. SillyTavern only runs an
-        // interceptor when it is genuinely about to generate, so Simple Send —
-        // which is `/send {{input}} | /setinput` and never generates — never gets
-        // here. ChatBridge already forwarded the text on MESSAGE_SENT; this asks
-        // for the reply that the text alone must not imply.
-        try {
-            session.chat.requestGenerationFromHost(type);
-        } catch (error) {
-            console.error('[Multiplayer] Could not ask the host for a reply', error);
-        }
-        // Abort so the client does not also hit its own API with a half-synced
-        // context.
+        // ChatBridge already forwarded this on MESSAGE_SENT; abort so the
+        // client does not also hit its own API with a half-synced context.
         abort(true);
         globalThis.toastr?.info('Sent to the host — their model will answer for the room.', 'Multiplayer');
         return;
@@ -217,12 +200,6 @@ export async function init() {
         console.error('[Multiplayer] Failed to mount the typing indicator', error);
     }
 
-    try {
-        session.notice.mount();
-    } catch (error) {
-        console.error('[Multiplayer] Failed to mount the generation notice', error);
-    }
-
     registerSlashCommands(deps);
 
     // Leaving a session cleanly on unload stops the relay from holding a dead
@@ -251,7 +228,6 @@ async function teardown() {
     try { await session?.leave(); } catch { /* ignore */ }
     try { session?.ooc.destroy(); } catch { /* ignore */ }
     try { session?.typing.destroy(); } catch { /* ignore */ }
-    try { session?.notice.destroy(); } catch { /* ignore */ }
     ui?.destroy();
     session = null;
     ui = null;

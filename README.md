@@ -76,6 +76,12 @@ depth, probability, inclusion groups, recursion and the token budget all behave
 normally. Binding to the chat rather than globally means the book applies in the
 shared session and provably nowhere else, and it is unbound when the session ends.
 
+Clicking a player in the roster opens their profile: portrait, description, and
+their lorebook as a searchable list with the keywords as the headline and the
+content one click away. Entries that fire unconditionally are flagged, since
+those are always in the prompt. A 64-entry book is browsable rather than a wall
+of text.
+
 The Multiplayer panel reports exactly what reached the prompt — how many players
 are named, how many have descriptions, how many lorebook entries are active, and
 who has published nothing yet.
@@ -130,24 +136,6 @@ load Multiplayer without it and say exactly what's missing. The reason is its
 triggering a reply, so several players can act before the model answers. Guided
 Generations already provides that button, and duplicating it would just mean two
 buttons doing the same job.
-
-The room also gets a banner above the transcript saying who asked for a reply and
-whether it has started. In a single-player chat the state of the model is obvious
-— you pressed send, so you know something is coming — but in a shared room it is
-invisible, and everyone else keeps typing into a reply that is already being
-written. The turn then lands after the reply and reads as a non-sequitur. The
-typing indicator does not cover this: it says who is *composing*, which stops at
-the moment the interesting part begins.
-
-Making that work took a protocol split, because Simple Send is indistinguishable
-from a normal send on the wire — both append a user message and both fire
-`MESSAGE_SENT`. A client therefore sends the text (`chat.turn`) and the intent to
-generate (`gen.request`) as separate messages, and the host only ever answers the
-second. The intent comes from the client's `generate_interceptor`, which
-SillyTavern runs *only* when it is genuinely about to generate, so Simple Send
-never produces one and no enumeration of Guided Generations' tools is required —
-its Thinking, Clothes and State guides, and anything added later, all behave
-correctly for free.
 
 One caveat about how ST resolves dependencies: the name it matches is the
 *folder* name, not anything inside Guided Generations' own manifest. Installing
@@ -462,6 +450,13 @@ Seven bugs came out of writing these, all fixed:
 - Port-mapping discovery originally probed each candidate gateway in sequence, so
   hosting blocked for four and a half seconds before a code appeared. Candidates
   and protocols are now raced under a 2.6-second ceiling.
+- **The persona profile dumped an entire lorebook into one centred scroll box.**
+  With a 64-entry book that is unreadable: no way to find an entry, no sense of
+  how they are organised, and the keys — the most useful part, since they say when
+  an entry fires — buried inline in brackets. Rebuilt as a searchable list of
+  collapsed entries. It also now passes a DOM element to `callGenericPopup`
+  rather than an HTML string, which keeps the search listener alive and means no
+  player-supplied text is ever parsed as markup.
 - **Persona lorebooks were keyword-scanned and pasted inline.** That quietly
   ignored secondary keys, selective logic, per-entry scan depth, whole-word and
   case sensitivity, insertion position, order, at-depth placement, probability,
