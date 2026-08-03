@@ -558,6 +558,313 @@
     font-size: 0.8em;
 }
 
+/* ── persona profiles ────────────────────────────────────────────────────── */
+
+/* ── room view (persona browser) ─────────────────────────────────────────── */
+
+/*
+ * The organising idea: the question a reader brings to this panel is "can the
+ * model see this", not "what does it say". So state comes first and everything
+ * else is quiet around it. Two panes — the room on the left, one player on the
+ * right — because comparing personas was the thing the old one-at-a-time popup
+ * made impossible.
+ */
+
+.stmp-room {
+    display: grid;
+    grid-template-columns: 190px minmax(0, 1fr);
+    grid-template-areas: 'rail pane' 'legend legend';
+    gap: 0 16px;
+    /* SillyTavern's popup centres its content. Long prose read down a centred
+     * axis is close to unreadable, and it was the first thing wrong with the
+     * old view. */
+    text-align: left;
+}
+
+@media (max-width: 640px) {
+    .stmp-room {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas: 'rail' 'pane' 'legend';
+        gap: 12px;
+    }
+}
+
+/* -- the rail ------------------------------------------------------------- */
+
+.stmp-rail {
+    grid-area: rail;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 60vh;
+    overflow-y: auto;
+    padding-right: 8px;
+    border-right: 1px solid var(--SmartThemeBorderColor);
+}
+
+@media (max-width: 640px) {
+    .stmp-rail {
+        flex-direction: row;
+        max-height: none;
+        overflow-x: auto;
+        padding: 0 0 8px;
+        border-right: none;
+        border-bottom: 1px solid var(--SmartThemeBorderColor);
+    }
+}
+
+.stmp-rail-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px;
+    border: none;
+    border-radius: 4px;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+    /* Nothing moves on hover: the rail is a list of people, and a list that
+     * shifts under the cursor is harder to scan, not friendlier. */
+    transition: background-color 0.1s ease-out;
+}
+
+.stmp-rail-item:hover { background-color: var(--black30a); }
+.stmp-rail-item:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: -2px; }
+.stmp-rail-item.stmp-rail-on { background-color: var(--black50a); }
+
+.stmp-rail-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.stmp-rail-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.stmp-rail-marks { display: flex; gap: 4px; }
+
+/* -- state markers -------------------------------------------------------- */
+
+/*
+ * The one piece of vocabulary this panel teaches. Filled means the model is
+ * being given it; hollow means it exists but is not reaching the model. Used
+ * identically in the rail and in the detail pane, so learning it once is enough.
+ */
+.stmp-state {
+    display: inline-block;
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    box-sizing: border-box;
+}
+
+.stmp-state-live {
+    background-color: var(--SmartThemeQuoteColor, #6b9dd6);
+}
+
+.stmp-state-waiting {
+    border: 1.5px solid #e0a52a;
+}
+
+.stmp-state-absent {
+    border: 1.5px solid var(--SmartThemeBorderColor);
+    opacity: 0.7;
+}
+
+/* -- the detail pane ------------------------------------------------------ */
+
+.stmp-pane {
+    grid-area: pane;
+    max-height: 60vh;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.stmp-detail-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.stmp-titles { min-width: 0; }
+.stmp-titles h3 { margin: 0 0 2px; }
+.stmp-titles p { margin: 0; }
+
+.stmp-portrait {
+    flex: none;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border-radius: 4px;
+    background-color: var(--black30a);
+}
+
+.stmp-portrait img { width: 100%; height: 100%; object-fit: cover; }
+.stmp-portrait-sm { width: 28px; height: 28px; }
+.stmp-portrait-lg { width: 56px; height: 56px; }
+
+.stmp-portrait-initials {
+    font-size: 0.75em;
+    opacity: 0.65;
+    letter-spacing: 0.04em;
+}
+
+.stmp-status {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    margin: 10px 0;
+    padding: 7px 10px;
+    border-radius: 4px;
+    background-color: var(--black30a);
+    font-size: 0.85em;
+}
+
+.stmp-status-detail { opacity: 0.75; }
+
+.stmp-section { margin-top: 14px; }
+
+.stmp-persona-text {
+    margin-top: 4px;
+    padding: 8px;
+    max-height: 26vh;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    border-radius: 4px;
+    background-color: var(--black30a);
+    /* A measure, so a wide popup does not produce 200-character lines. */
+    max-width: 68ch;
+}
+
+/* -- lorebook ------------------------------------------------------------- */
+
+.stmp-lore {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+}
+
+.stmp-lore-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.stmp-count { font-size: 0.82em; opacity: 0.6; }
+
+.stmp-lore-search { width: 100%; margin: 8px 0; }
+
+.stmp-lore-list {
+    max-height: 34vh;
+    overflow-y: auto;
+    border-radius: 4px;
+    background-color: var(--black30a);
+}
+
+.stmp-entry { border-bottom: 1px solid var(--SmartThemeBorderColor); }
+.stmp-entry:last-of-type { border-bottom: none; }
+.stmp-entry[hidden] { display: none; }
+
+.stmp-entry > summary {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 7px 10px;
+    cursor: pointer;
+    list-style: none;
+}
+
+.stmp-entry > summary::-webkit-details-marker { display: none; }
+.stmp-entry > summary:hover { background-color: var(--black50a); }
+.stmp-entry > summary:focus-visible { outline: 2px solid var(--SmartThemeQuoteColor); outline-offset: -2px; }
+
+.stmp-keys {
+    display: flex;
+    flex: none;
+    gap: 4px;
+    max-width: 45%;
+    overflow: hidden;
+}
+
+/*
+ * Keys are literal strings the World Info engine matches on, so they are set in
+ * the monospace face; the content beside them is prose and is not. The old view
+ * put both in mono, which told the reader nothing about either.
+ */
+.stmp-key {
+    padding: 1px 5px;
+    border-radius: 3px;
+    background-color: var(--black50a);
+    font-family: var(--monoFontFamily, monospace);
+    font-size: 0.75em;
+    white-space: nowrap;
+}
+
+.stmp-key-none { opacity: 0.5; font-style: italic; }
+
+.stmp-entry-peek {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.85em;
+    opacity: 0.7;
+}
+
+.stmp-entry[open] > summary .stmp-entry-peek { opacity: 0.35; }
+
+.stmp-entry-body {
+    padding: 0 10px 10px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.88em;
+    line-height: 1.55;
+    max-width: 68ch;
+}
+
+.stmp-lore-empty { padding: 10px; margin: 0; }
+
+/* -- legend --------------------------------------------------------------- */
+
+.stmp-legend {
+    grid-area: legend;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+    margin: 14px 0 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+    font-size: 0.78em;
+    opacity: 0.6;
+}
+
+.stmp-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .stmp-rail-item { transition: none; }
+}
+
+#stmp_settings .stmp-persona {
+    padding: 0 7px;
+    margin: 0;
+    line-height: 1.6;
+}
+
 /* ── shared session panel ────────────────────────────────────────────────── */
 
 #stmp_settings .stmp-session-state {
@@ -668,235 +975,54 @@
     border-left-color: #e0a52a;
 }
 
-/* ══════════════════════════════════════════════════════════════════════════
-   Persona profiles
+/* ---------------------------------------------------------------------------
+ * Generation notice
+ *
+ * Sits above the transcript rather than above the composer, where the typing
+ * indicator lives — this is about the state of the room, not the state of your
+ * own text box, and two bars on the send form would compete for the same glance.
+ *
+ * Sticky so it stays visible while scrolling back through history: someone
+ * reading earlier messages is exactly the person about to type into a reply
+ * that has already started.
+ * ------------------------------------------------------------------------- */
 
-   Rebuilt from a single centred scroll box, which was unreadable with a
-   64-entry lorebook. Left-aligned throughout, keys as the headline, content
-   collapsed behind them, and a search box because scrolling 64 entries to find
-   one is not a plan.
-   ══════════════════════════════════════════════════════════════════════════ */
-
-.stmp-profile {
-    text-align: left;
-    max-height: 72vh;
-    overflow-y: auto;
-    padding-right: 4px;
-}
-
-.stmp-profile-head {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding-bottom: 12px;
-    margin-bottom: 4px;
-    border-bottom: 1px solid var(--SmartThemeBorderColor);
-}
-
-.stmp-profile-avatar {
-    width: 56px;
-    height: 56px;
-    flex-shrink: 0;
-    border-radius: 8px;
-    object-fit: cover;
-    box-shadow: 0 0 0 1px var(--SmartThemeBorderColor);
-}
-
-.stmp-profile-avatar-empty {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 1.5em;
-    font-weight: 600;
-    opacity: 0.5;
-    background-color: var(--black30a);
-}
-
-.stmp-profile-name {
-    font-size: 1.15em;
-    font-weight: 600;
-    line-height: 1.3;
-}
-
-.stmp-profile-sub {
-    font-size: 0.85em;
-    opacity: 0.65;
-}
-
-.stmp-profile-section {
-    margin-top: 16px;
-}
-
-.stmp-profile-label {
-    font-size: 0.72em;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    opacity: 0.5;
-    margin-bottom: 5px;
-}
-
-.stmp-profile-desc {
-    padding: 9px 11px;
-    border-radius: 5px;
-    line-height: 1.55;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-    background-color: var(--black30a);
-    border-left: 2px solid var(--SmartThemeBorderColor);
-}
-
-.stmp-profile-empty {
-    opacity: 0.5;
-    font-style: italic;
-}
-
-/* ── lorebook ─────────────────────────────────────────────────────────── */
-
-.stmp-profile-lorehead {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 8px;
-}
-
-.stmp-profile-bookname {
-    font-weight: 600;
-    overflow-wrap: anywhere;
-}
-
-.stmp-profile-search {
-    width: 100%;
-    margin-bottom: 8px;
-    font-size: 0.9em;
-}
-
-.stmp-profile-entries {
-    max-height: 42vh;
-    overflow-y: auto;
-    border: 1px solid var(--SmartThemeBorderColor);
-    border-radius: 5px;
-}
-
-.stmp-lore-entry {
-    border-bottom: 1px solid var(--SmartThemeBorderColor);
-}
-
-.stmp-lore-entry:last-of-type {
-    border-bottom: none;
-}
-
-.stmp-lore-entry > summary {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    padding: 7px 10px;
-    cursor: pointer;
-    list-style: none;
-    font-size: 0.88em;
-}
-
-.stmp-lore-entry > summary::-webkit-details-marker {
-    display: none;
-}
-
-.stmp-lore-entry > summary::before {
-    content: "\25b8";
-    flex-shrink: 0;
-    opacity: 0.45;
-    transition: transform 0.12s ease-out;
-}
-
-.stmp-lore-entry[open] > summary::before {
-    transform: rotate(90deg);
-}
-
-.stmp-lore-entry > summary:hover {
-    background-color: var(--white20a, rgb(255 255 255 / 6%));
-}
-
-.stmp-lore-keys {
-    font-family: var(--monoFontFamily, monospace);
-    font-size: 0.92em;
-    font-weight: 600;
-    color: var(--SmartThemeQuoteColor, #6fb3e0);
-    /* Long key lists must not push the preview off the row. */
-    max-width: 45%;
+#stmp_generation_bar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    margin: 0 auto 4px;
+    padding: 5px 12px;
+    max-width: 100%;
+    border-radius: 4px;
+    border-left: 3px solid var(--SmartThemeQuoteColor, #6b9dd6);
+    background-color: var(--black50a, rgba(0, 0, 0, 0.5));
+    color: var(--SmartThemeBodyColor);
+    font-size: 0.82em;
+    line-height: 1.4;
+    opacity: 0;
+    transition: opacity 0.15s ease-out;
+    pointer-events: none;
+    /* A long persona name must not reflow the chat. */
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    flex-shrink: 0;
 }
 
-.stmp-lore-preview {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 0.92em;
+#stmp_generation_bar.stmp-generation-visible {
+    opacity: 0.92;
 }
 
-.stmp-lore-entry[open] .stmp-lore-preview {
+/* Generating draws slightly more attention than merely queued: this is the
+ * state in which sending a turn actively damages the reply. */
+#stmp_generation_bar.stmp-generation-running {
+    border-left-color: var(--golden, #d6a83a);
+}
+
+#stmp_generation_bar[hidden] {
     display: none;
 }
 
-.stmp-lore-body {
-    padding: 2px 12px 10px 26px;
-    font-size: 0.88em;
-    line-height: 1.55;
-    white-space: pre-wrap;
-    overflow-wrap: anywhere;
-}
-
-.stmp-lore-secondary {
-    padding: 0 12px 8px 26px;
-    font-size: 0.78em;
-}
-
-.stmp-lore-disabled {
-    opacity: 0.45;
-}
-
-.stmp-profile-foot {
-    margin-top: 14px;
-    padding-top: 10px;
-    border-top: 1px solid var(--SmartThemeBorderColor);
-    font-size: 0.8em;
-}
-
-/* ── chips ────────────────────────────────────────────────────────────── */
-
-.stmp-chip {
-    flex-shrink: 0;
-    padding: 1px 7px;
-    border-radius: 9px;
-    font-size: 0.72em;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    white-space: nowrap;
-}
-
-.stmp-chip-on {
-    color: #7fc47f;
-    background-color: rgb(127 196 127 / 14%);
-    box-shadow: inset 0 0 0 1px rgb(127 196 127 / 35%);
-}
-
-.stmp-chip-off {
-    color: #b0b0b0;
-    background-color: rgb(176 176 176 / 12%);
-    box-shadow: inset 0 0 0 1px rgb(176 176 176 / 28%);
-}
-
-.stmp-chip-always {
-    color: #e0bb5c;
-    background-color: rgb(224 187 92 / 14%);
-    box-shadow: inset 0 0 0 1px rgb(224 187 92 / 35%);
-}
-
-@media (width <= 600px) {
-    .stmp-lore-keys { max-width: 60%; }
-    .stmp-lore-preview { display: none; }
+@media (prefers-reduced-motion: reduce) {
+    #stmp_generation_bar { transition: none; }
 }
