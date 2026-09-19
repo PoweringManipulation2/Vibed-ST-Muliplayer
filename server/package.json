@@ -1,6 +1,6 @@
 {
     "name": "st-multiplayer",
-    "version": "1.0.0",
+    "version": "1.4.0",
     "private": true,
     "description": "Local relay for the SillyTavern Multiplayer extension.",
     "type": "module",

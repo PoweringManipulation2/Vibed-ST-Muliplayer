@@ -8,7 +8,7 @@
  * =====================================================================
  */
 
-export const PROTOCOL_REVISION = 'STMP/1.2.0';
+export const PROTOCOL_REVISION = 'STMP/1.4.0';
 
 export const FRAME_VERSION = 0x01;
 export const HEADER_SIZE = 10;
@@ -57,6 +57,7 @@ export const REJECT_REASON = Object.freeze({
 });
 
 export const OP = Object.freeze({
+    WELCOME_UPDATE: 'welcome.update', // metadata only; never restarts admission
     WELCOME: 'welcome',
     ROSTER: 'roster',
     PEER_JOIN: 'peer.join',

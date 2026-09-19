@@ -721,6 +721,8 @@ await test('the history is bounded, so it cannot grow without limit', async () =
     const peer = [...room.relay.peers.values()].find(candidate => candidate.name === 'PlayerA');
     peer.messageBucket = { take: () => true };
     peer.byteBucket = { take: () => true };
+    // Disable the sender's new pacing too: this case tests only history retention.
+    a.client._sendBudget = { take: async () => true };
 
     const total = OOC.HISTORY + 25;
     for (let i = 0; i < total; i++) {
@@ -746,6 +748,9 @@ await test('flooding the OOC channel trips the rate limit and drops the peer', a
 
     const closed = new Promise(resolve => a.client.addEventListener('close', () => resolve(true)));
 
+    // A deliberately misbehaving client bypasses its cooperative send budget.
+    // Normal bulk sharing is now paced instead of repeatedly hitting this limit.
+    a.client._sendBudget = { take: async () => true };
     // Well past LIMITS.RATE_MESSAGES within one window.
     for (let i = 0; i < LIMITS.RATE_MESSAGES * 3; i++) {
         a.client.send({ op: OP.OOC_MESSAGE, text: `spam ${i}` });

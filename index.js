@@ -23,6 +23,7 @@ import { getRequestHeaders, saveSettingsDebounced, user_avatar } from '../../../
 import { DEFAULT_PORT, LIMITS, SETTINGS_KEY, parseExtensionFolder } from './lib/protocol.js';
 import { MultiplayerSession } from './lib/session.js';
 import { MultiplayerUI } from './lib/ui.js';
+import { sharingState } from './lib/identity.js';
 
 /**
  * Folder name as SillyTavern addresses it when resolving templates.
@@ -83,6 +84,9 @@ let session = null;
 /** @type {MultiplayerUI|null} */
 let ui = null;
 let started = false;
+let activation = 0;
+let commandsRegistered = false;
+const onUnload = () => { try { session?.socket?.close('page closed'); } catch {} };
 
 function settings() {
     extension_settings[SETTINGS_KEY] ??= {};
@@ -90,6 +94,7 @@ function settings() {
     for (const [key, value] of Object.entries(DEFAULT_SETTINGS)) {
         if (current[key] === undefined) current[key] = Array.isArray(value) ? [...value] : value;
     }
+    sharingState(current, save);
     current.maxPeers = Math.min(LIMITS.MAX_PEERS, Math.max(2, Number(current.maxPeers) || 4));
     return current;
 }
@@ -132,7 +137,7 @@ function buildDeps() {
  * host, which owns the API connection and the canonical transcript, and local
  * generation is aborted before a prompt is assembled.
  */
-globalThis.stmpGenerateInterceptor = async function stmpGenerateInterceptor(chat, _contextSize, abort, type) {
+async function stmpGenerateInterceptor(chat, _contextSize, abort, type) {
     if (!session?.connected) return;
 
     // Host: this is the last moment before the prompt is assembled, which makes
@@ -181,7 +186,7 @@ globalThis.stmpGenerateInterceptor = async function stmpGenerateInterceptor(chat
         return;
     }
     abort(true);
-};
+}
 
 /**
  * `activate` hook from manifest.json. Idempotent: SillyTavern can call it again
@@ -190,6 +195,8 @@ globalThis.stmpGenerateInterceptor = async function stmpGenerateInterceptor(chat
 export async function init() {
     if (started) return;
     started = true;
+    const generation = ++activation;
+    globalThis.stmpGenerateInterceptor = stmpGenerateInterceptor;
 
     const deps = buildDeps();
     settings();
@@ -202,6 +209,8 @@ export async function init() {
     } catch (error) {
         console.error('[Multiplayer] Failed to mount the settings panel', error);
     }
+
+    if (generation !== activation) return; // disabled/re-enabled while the template loaded
 
     // The OOC panel lives outside the settings drawer so players can use it
     // while the roleplay is on screen.
@@ -227,9 +236,7 @@ export async function init() {
 
     // Leaving a session cleanly on unload stops the relay from holding a dead
     // peer slot until its heartbeat expires.
-    globalThis.addEventListener('beforeunload', () => {
-        try { session?.socket?.close('page closed'); } catch { /* nothing useful to do here */ }
-    });
+    globalThis.addEventListener('beforeunload', onUnload);
 
     console.log(`[Multiplayer] ready (folder: ${EXTENSION_FOLDER})`);
 }
@@ -248,26 +255,34 @@ export async function onDelete() {
 }
 
 async function teardown() {
-    try { await session?.leave(); } catch { /* ignore */ }
-    try { session?.ooc.destroy(); } catch { /* ignore */ }
-    try { session?.typing.destroy(); } catch { /* ignore */ }
-    try { session?.notice.destroy(); } catch { /* ignore */ }
-    ui?.destroy();
+    ++activation;
+    const oldSession = session, oldUI = ui;
     session = null;
     ui = null;
     started = false;
+    globalThis.removeEventListener('beforeunload', onUnload);
     delete globalThis.stmpGenerateInterceptor;
+    oldUI?.destroy();
+    try { oldSession?.ooc.destroy(); } catch { /* ignore */ }
+    try { oldSession?.typing.destroy(); } catch { /* ignore */ }
+    try { oldSession?.notice.destroy(); } catch { /* ignore */ }
+    try { await oldSession?.leave(); } catch { /* ignore */ }
 }
 
 function registerSlashCommands(deps) {
+    if (commandsRegistered) return;
     const context = deps.getContext();
     const { SlashCommandParser, SlashCommand, SlashCommandArgument, ARGUMENT_TYPE } = context;
     if (!SlashCommandParser?.addCommandObject) return;
+    commandsRegistered = true;
 
     const register = (name, callback, helpString, unnamed = []) => {
         try {
             SlashCommandParser.addCommandObject(SlashCommand.fromProps({
-                name, callback, helpString, unnamedArgumentList: unnamed,
+                name, callback: (...args) => {
+                    if (!session) { globalThis.toastr?.warning('Enable Multiplayer before using this command.'); return ''; }
+                    return callback(...args);
+                }, helpString, unnamedArgumentList: unnamed,
             }));
         } catch (error) {
             console.warn(`[Multiplayer] Could not register /${name}`, error);
@@ -308,6 +323,9 @@ function registerSlashCommands(deps) {
     }, 'Sends a message to the player-only chat, or opens the panel when given no text.', [
         SlashCommandArgument.fromProps({ description: 'message', typeList: [ARGUMENT_TYPE.STRING], isRequired: false }),
     ]);
+
+    register('mp-storage', () => JSON.stringify(session?.storage.audit() ?? {}), 'Read-only shared storage report. Does not delete cards or chats.');
+    register('mp-resync', async () => { await session?.resyncSharedData(); return 'resync requested'; }, 'Recheck shared cards and your persona without duplicating existing copies.');
 
     register('mp-status', () => JSON.stringify({
         status: session.status, role: session.role, peers: session.peers.length,

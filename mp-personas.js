@@ -9,19 +9,15 @@
  *   HOST    ingestPersona() / stampPlayer() / restampChat() / injectRoster()
  */
 
+import { sharingState, sourceIdentity, objectHash, contentHash, sharedWrite, validIdentity } from './lib/identity.js';
+
 const MODULE_NAME = 'multiplayer';
-const FILE_PREFIX = 'mp';
 
 const ctx = () => SillyTavern.getContext();
 
-/* ------------------------------------------------------------------ *
- * ⚠️  THE ONE THING YOU MUST VERIFY
- *
- * Open devtools → Network, then upload a persona image by hand through
- * Persona Management. Copy the request URL and the form field name from
- * that request into the two constants below. Everything else in this
- * file is confirmed against your own chat JSONL and the ST docs.
- * ------------------------------------------------------------------ */
+// Compatibility helper for integrations that explicitly import personas.
+// The main extension uses lib/chat.js and does NOT auto-import remote personas.
+// These are the native SillyTavern multipart avatar-upload field names.
 const AVATAR_UPLOAD_URL = '/api/avatars/upload';
 const AVATAR_UPLOAD_FIELD = 'avatar';
 
@@ -54,10 +50,6 @@ export function avatarIdFromForceAvatar(forceAvatar) {
     }
 }
 
-function sanitize(s) {
-    return String(s).replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 40);
-}
-
 async function blobToBase64(blob) {
     const buf = new Uint8Array(await blob.arrayBuffer());
     let bin = '';
@@ -72,7 +64,7 @@ async function blobToBase64(blob) {
  * ------------------------------------------------------------------ */
 
 /** Avatars this client has already shipped to the host, this connection. */
-const sentAvatars = new Set();
+const sentAvatars = new Map();
 
 /**
  * Call on every (re)connect. The host may have restarted or had its
@@ -86,8 +78,8 @@ export function resetPersonaCache() {
  * Build the outbound packet for a message ST just recorded.
  * Call from your MESSAGE_SENT handler with the message index.
  *
- * The persona payload rides along only the first time a given avatar is
- * seen — after that it's just text, so ongoing traffic stays tiny.
+ * A persona payload travels once per content revision. Same-filename edits
+ * are detected too; unchanged revisions are omitted from subsequent packets.
  */
 export async function buildOutgoingMessage(messageIndex) {
     const c = ctx();
@@ -105,10 +97,14 @@ export async function buildOutgoingMessage(messageIndex) {
         // separate request_generation packet; this one never asks for a reply.
     };
 
-    if (avatarId && !sentAvatars.has(avatarId)) {
+    if (avatarId) {
         try {
-            packet.persona = await collectPersona(avatarId, mes.force_avatar);
-            sentAvatars.add(avatarId);
+            const persona = await collectPersona(avatarId, mes.force_avatar);
+            const revision = await objectHash(persona);
+            if (sentAvatars.get(avatarId) !== revision) {
+                packet.persona = persona;
+                sentAvatars.set(avatarId, revision);
+            }
         } catch (err) {
             console.error(`[${MODULE_NAME}] persona capture failed`, err);
             // Ship the message anyway — a missing icon beats a dropped line.
@@ -124,10 +120,13 @@ async function collectPersona(avatarId, imageUrl) {
     // Fetch the same URL the DOM is already rendering. Guaranteed to resolve,
     // unlike guessing at the User Avatars path. Downside: if thumbnailing is
     // on you get the thumbnail, not the original. Fine for a chat icon.
-    const res = await fetch(imageUrl);
+    const res = await fetch(imageUrl, { cache: 'no-cache' });
     if (!res.ok) throw new Error(`avatar fetch ${res.status}`);
 
+    const state = sharingState(settings(), () => ctx().saveSettingsDebounced());
     return {
+        ownerId: state.ownerId,
+        personaId: sourceIdentity(state, 'persona', avatarId, () => ctx().saveSettingsDebounced()),
         avatarId,
         displayName: pu.personas?.[avatarId] ?? ctx().name1,
         descriptor: structuredClone(pu.persona_descriptions?.[avatarId] ?? {}),
@@ -145,33 +144,53 @@ async function collectPersona(avatarId, imageUrl) {
  * Returns the local filename.
  */
 export async function ingestPersona(playerId, persona) {
-    const key = `${playerId}:${persona.avatarId}`;
-    const map = settings().personaMap;
-    if (map[key]) return map[key];
-
-    const localFile = `${FILE_PREFIX}_${sanitize(playerId)}_${Date.now()}.png`;
-    await uploadAvatar(localFile, persona.pngBase64);
-
-    const pu = ctx().powerUserSettings;
-    pu.personas ??= {};
-    pu.persona_descriptions ??= {};
-
-    pu.personas[localFile] = persona.displayName;
-    pu.persona_descriptions[localFile] = {
-        description: '',
-        depth: 4,
-        role: 0,
-        lorebook: '',
-        ...persona.descriptor,
-        // Force NONE. We keep the description text so injectRoster() can read
-        // it, but ST must never auto-inject it as if it were the host's own
-        // active persona. 9 = NONE in persona_description_positions.
-        position: 9,
-    };
-
-    map[key] = localFile;
-    ctx().saveSettingsDebounced();
-    return localFile;
+    if (!persona || typeof persona.avatarId !== 'string' || typeof persona.pngBase64 !== 'string'
+        || persona.pngBase64.length > 4 * 1024 * 1024) throw new Error('Invalid or oversized persona');
+    const stable = persona.ownerId !== undefined || persona.personaId !== undefined;
+    if (stable && (!validIdentity(persona.ownerId) || !validIdentity(persona.personaId))) throw new Error('Invalid persona identity');
+    const key = JSON.stringify(stable ? [persona.ownerId, persona.personaId] : ['legacy', String(playerId), persona.avatarId]);
+    return sharedWrite(`persona:${key}`, async () => {
+        const state = sharingState(settings(), () => ctx().saveSettingsDebounced());
+        const map = settings().personaMap;
+        const alias = `${playerId}:${persona.avatarId}`;
+        let record = state.remotePersonas[key];
+        const pu = ctx().powerUserSettings;
+        pu.personas ??= {};
+        pu.persona_descriptions ??= {};
+        const revision = await objectHash({ displayName: persona.displayName, descriptor: persona.descriptor, pngBase64: persona.pngBase64 });
+        const response = await fetch('/api/avatars/get', { method: 'POST', headers: ctx().getRequestHeaders(), body: '{}' });
+        if (!response.ok) throw new Error(`Could not check existing persona avatars (${response.status})`);
+        const files = await response.json();
+        if (!Array.isArray(files)) throw new Error('Invalid persona avatar listing');
+        let localFile = record?.avatar ?? map[alias];
+        if (!localFile) {
+            localFile = `stmp_persona_${(await contentHash(key)).slice(0, 32)}.png`;
+            if (files.includes(localFile)) throw new Error('Persona filename conflict; nothing was overwritten.');
+        }
+        if (typeof localFile !== 'string' || /[\\/\x00-\x1f]/.test(localFile) || !localFile.endsWith('.png')) throw new Error('Invalid local persona filename');
+        const currentMarker = pu.persona_descriptions[localFile]?.st_multiplayer;
+        if (currentMarker?.key && currentMarker.key !== key) throw new Error('This local persona belongs to another sharing identity');
+        if (record?.revision !== revision || !files.includes(localFile) || !currentMarker) {
+            // Persist a reservation before uploading. After an interrupted upload,
+            // a retry overwrites this same reserved file, never a timestamped copy.
+            record = { avatar: localFile, revision: record?.revision ?? null, pendingRevision: revision };
+            state.remotePersonas[key] = record;
+            ctx().saveSettingsDebounced();
+            await uploadAvatar(localFile, persona.pngBase64);
+            pu.personas[localFile] = String(persona.displayName ?? 'Player').slice(0, 128);
+            pu.persona_descriptions[localFile] = {
+                description: '', depth: 4, role: 0, lorebook: '',
+                ...(persona.descriptor ?? {}),
+                // NONE: remote descriptions must never become the host's own persona.
+                position: 9,
+                st_multiplayer: { key, ownerId: persona.ownerId, personaId: persona.personaId },
+            };
+            state.remotePersonas[key] = { avatar: localFile, revision };
+        }
+        map[alias] = localFile; // compatibility with stamped historical chat messages
+        ctx().saveSettingsDebounced();
+        return localFile;
+    });
 }
 
 async function uploadAvatar(fileName, pngBase64) {
@@ -181,7 +200,7 @@ async function uploadAvatar(fileName, pngBase64) {
     form.append(AVATAR_UPLOAD_FIELD, new File([bytes], fileName, { type: 'image/png' }));
     form.append('overwrite_name', fileName);
 
-    const headers = ctx().getRequestHeaders();
+    const headers = { ...ctx().getRequestHeaders() };
     // Must go — the browser sets its own multipart boundary.
     delete headers['Content-Type'];
     delete headers['content-type'];
@@ -193,6 +212,8 @@ async function uploadAvatar(fileName, pngBase64) {
             `check AVATAR_UPLOAD_URL / AVATAR_UPLOAD_FIELD against your install`
         );
     }
+    const result = await res.json();
+    if (result?.path !== fileName) throw new Error('Persona upload did not confirm the requested filename');
 }
 
 /**

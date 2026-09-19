@@ -1,0 +1,99 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Multiplayer UI lifecycle smoke test</title>
+<div id="extensions_settings2"></div>
+<div id="rm_print_characters_block"></div>
+<div id="chat"></div>
+<pre id="results">Running...</pre>
+<script type="module">
+import { MultiplayerUI } from '../lib/ui.js';
+import { MultiplayerSession } from '../lib/session.js';
+import { MARKER } from '../lib/cards.js';
+
+const passed = [];
+function check(condition, label) { if (!condition) throw new Error(label); passed.push(label); }
+const template = await (await fetch('../settings.html')).text();
+const handlers = new Map();
+const eventSource = {
+    on(type, fn) { if (!handlers.has(type)) handlers.set(type, new Set()); handlers.get(type).add(fn); },
+    removeListener(type, fn) { handlers.get(type)?.delete(fn); },
+    emit(type, ...args) { for (const fn of handlers.get(type) ?? []) fn(...args); },
+};
+const count = () => [...handlers.values()].reduce((sum, set) => sum + set.size, 0);
+const settings = { sharedCards: [], maxPeers: 4 };
+const warnings = [];
+const context = {
+    characters: [], chat: [], powerUserSettings: {}, eventSource,
+    eventTypes: Object.fromEntries(['CHARACTER_PAGE_LOADED', 'CHAT_CHANGED', 'MESSAGE_SENT', 'MORE_MESSAGES_LOADED',
+        'MESSAGE_SWIPED', 'MESSAGE_UPDATED', 'PERSONA_UPDATED', 'SETTINGS_UPDATED', 'CHARACTER_EDITED', 'CHARACTER_RENAMED']
+        .map(type => [type, type])),
+    renderExtensionTemplateAsync: async () => template,
+    substituteParams: () => 'Player', setExtensionPrompt() {},
+    POPUP_TYPE: { TEXT: 1, CONFIRM: 2 }, callGenericPopup: async () => false,
+};
+const deps = {
+    getContext: () => context, settings: () => settings, save() {},
+    getRequestHeaders: () => ({ 'Content-Type': 'application/json' }), extensionFolder: 'test',
+    toastr: { warning: text => warnings.push(text), error: text => { throw new Error(text); }, info() {}, success() {} },
+};
+const session = new MultiplayerSession(deps);
+let publications = 0;
+session.publishPersona = async () => { publications++; };
+try {
+    let baseline;
+    for (let i = 0; i < 10; i++) {
+        const ui = new MultiplayerUI({ session, deps });
+        await ui.mount();
+        baseline ??= count();
+        check(count() === baseline && baseline > 0, `mount ${i}: one listener set`);
+        check(document.querySelectorAll('#stmp_settings').length === 1, `mount ${i}: one panel`);
+        ui.destroy();
+        check(count() === 0, `destroy ${i}: no ST event listeners`);
+        check(ui._sessionHandlers.length === 0, `destroy ${i}: no session listeners`);
+        check(document.querySelectorAll('#stmp_settings').length === 0, `destroy ${i}: panel removed`);
+    }
+    eventSource.emit('SETTINGS_UPDATED');
+    await new Promise(resolve => setTimeout(resolve, 350));
+    check(publications === 0, 'disabled event handlers cannot publish a persona');
+
+    let release;
+    context.renderExtensionTemplateAsync = () => new Promise(resolve => { release = resolve; });
+    const delayed = new MultiplayerUI({ session, deps });
+    const pending = delayed.mount();
+    delayed.destroy(); release(template); await pending;
+    check(count() === 0 && !document.querySelector('#stmp_settings'), 'disable during async template load cannot remount an old panel');
+    context.renderExtensionTemplateAsync = async () => template;
+
+    const shared = { cardId: 'known-card', ownerId: 'host', sourceId: 'card', name: 'Known', defHash: 'revision' };
+    session.cardIndex = [shared]; session.role = 'client'; session.status = 'connected';
+    context.characters = [
+        { name: 'Known', avatar: 'known.png', data: { extensions: { [MARKER]: { remote: true, cardId: 'known-card' } } } },
+        { name: 'Other host', avatar: 'other.png', data: { extensions: { [MARKER]: { remote: true, cardId: 'other-card' } } } },
+    ];
+    document.querySelector('#rm_print_characters_block').innerHTML = '<div class="character_select" data-chid="0"><div class="avatar"></div></div><div class="character_select" data-chid="1"><div class="avatar"></div></div>';
+    const ui = new MultiplayerUI({ session, deps }); await ui.mount(); ui.decorateCharacterList();
+    const blocks = [...document.querySelectorAll('.character_select')];
+    check(!blocks[0].classList.contains('stmp-offline'), 'current host card is marked available');
+    check(blocks[1].classList.contains('stmp-offline'), 'another host card stays unavailable even while connected');
+    check(!blocks[1].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })), 'unrelated host card click is blocked');
+    check(warnings.length === 1, 'blocked click explains why');
+
+    let adopted = 0, refreshed = 0, resynced = 0;
+    session.storage.adopt = async () => { adopted++; return 'known.png'; };
+    session.refreshCharacters = async () => { refreshed++; };
+    session.resyncSharedData = async () => { resynced++; };
+    const selectCopy = root => { const selectors = root.querySelectorAll('select'); selectors[0].value = 'known-card'; selectors[1].value = 'known.png'; };
+    context.callGenericPopup = async root => { selectCopy(root); session._epoch++; return true; };
+    await ui.openStorageDialog();
+    check(adopted === 0, 'a room change invalidates a previously opened recovery dialog');
+    context.callGenericPopup = async root => { selectCopy(root); return true; };
+    await ui.openStorageDialog();
+    check(adopted === 1 && refreshed === 1 && resynced === 1, 'explicit recovery uses selected filename, refreshes, and resyncs');
+    ui.destroy();
+    check(!blocks.some(block => block.classList.contains('stmp-offline')), 'disable removes stale unavailable styling');
+    window.smokeResult = { ok: true, checks: passed.length, passed };
+} catch (error) {
+    window.smokeResult = { ok: false, checks: passed.length, passed, error: error.stack };
+}
+document.querySelector('#results').textContent = JSON.stringify(window.smokeResult, null, 2);
+</script>

@@ -1,659 +1,417 @@
 # SillyTavern Multiplayer
 
-Play SillyTavern together. One person hosts a room on their own machine, others
-join with a short connection code, and everyone shares one chat while keeping
-their own personas.
+One host, one shared roleplay, and a separate persona for each player. The host
+runs the model; joining players do not need their own inference API keys.
 
-Verified against **SillyTavern 1.18.0**.
+**Version 1.4.0: persistent sharing and reconnect reliability.** Both the browser
+extension and the host relay must be updated together. The wire revision is
+`STMP/1.4.0`; older peers are deliberately rejected rather than mixed into the
+same room.
 
----
+The manifest minimum remains SillyTavern 1.13.0. The character and persona API
+contracts were reviewed against upstream source, and the automated tests below
+pass. This release has **not** been exercised inside a complete running
+SillyTavern installation or on a real Tailscale connection. See
+[TEST_REPORT.md](TEST_REPORT.md) for the tested environment and remaining manual
+checks. The previous README's blanket claim of verification against 1.18.0 has
+been removed.
 
-## What it does
+## What changed in 1.4.0
 
-**Host mode and client mode in one extension.** Same install for everyone. Press
-*Start hosting* to open a room, or paste a code to join one. Nothing is
-configured twice.
+The old relay reused `welcome` for host-name updates. A browser answered that
+message with another roster/name announcement, producing a feedback loop.
+Repeated reconnects also left old connection IDs in the persona map. This
+release separates initial admission from `welcome.update`, makes admission
+idempotent, prunes departed personas, and ignores obsolete socket callbacks.
+The undefined `kind` variable in the router-mapping warning is fixed too.
 
-**Connection codes.** Hosting produces something like
-`STMP1-4T2M9-KX0BW-1FQ7P-…`, which packs the host's address, port and a
-freshly generated key. Codes are Crockford base32 with a checksum, so `O`/`0`
-and `I`/`1` mix-ups still decode and a single mistyped character is caught
-immediately rather than turning into a confusing connection failure.
+Character sharing now has a durable owner ID and a durable source-card ID.
+Those identify the same original across reconnects, page reloads, room changes,
+and new connection codes. The receiver remembers its existing local filename.
+Replaying the same revision does not import or edit the card again. A changed
+revision updates the same file, preserving its chat association and favourite
+state rather than making another copy. Host-side session copies follow the
+same rules.
 
-**Extension parity.** The relay fingerprints each peer's enabled third-party
-extensions and refuses to seat anyone whose set differs from the host's — two
-people with different mods cannot join each other. Instead of a dead end, the
-mismatched peer gets a diff and a **Sync extensions** button that installs
-what's missing, updates what's out of date, and disables (or, if you tick the
-box, deletes) anything extra. Extension git URLs come from SillyTavern's own
-`/api/extensions/version` endpoint, so syncing installs the same source the host
-is running rather than guessing.
+Additional safeguards include serialized per-item writes, disk verification,
+recovery after an ambiguous/lost import response, content hashes for definitions
+and portraits, bounded avatar reassembly, bounded reconnect retries, send pacing
+below the relay's rate limits, and cleanup of event listeners and observers on
+disable/re-enable. New **Shared storage / recovery** and **Resync shared data**
+controls make synchronization problems easier to inspect and recover from.
 
-**Cloud character cards.** The host picks which characters to share. Everyone
-else sees them in their normal Characters tab with a cloud badge on the avatar.
-Offline they're greyed out and clicking one explains why; connected, the card
-works normally.
+**Existing duplicates are not automatically deleted.** A character with a chat
+history is not disposable just because its name resembles another character.
+The recovery workflow below lets you choose an old remote copy to keep.
 
-The card *text* is never written to a client's disk. Only a stub — name, avatar,
-and a marker — is stored locally. The actual definition is streamed over the
-encrypted session when the card is opened, patched into memory for that session
-only, and wiped on disconnect. So "they can't use it unless they're connected"
-is literally true, and sharing a character doesn't hand out permanent copies of
-your writing.
+## Upgrading an existing installation
 
-**Player chat the model can't see.** A floating panel, toggled from the icon next
-to the send button, where players plan without any of it entering the roleplay.
-Sort out who acts next, fix a continuity problem, or just talk.
+1. Back up your SillyTavern data, including settings, characters, personas, chats,
+   and World Info. Stop active rooms. Preserve your existing extension settings;
+   clearing them is not a deduplication fix.
+2. Replace the contents of the **existing** Multiplayer extension folder with
+   this release, on the host and on every joining player's installation. Do not
+   install a second copy under another folder name. Keep your normal repository
+   directory if you plan to commit or apply the supplied patch.
+3. On the host, run `node install.mjs` from that extension folder again. This is
+   especially important when the relay was installed with `--copy`. Set
+   `enableServerPlugins: true` if it is not already enabled.
+4. Fully restart the host's SillyTavern server, then reload every player's
+   browser page. Start a new room and distribute its new code. Use matching
+   extension versions before testing reconnection.
 
-SillyTavern builds prompts by walking `getContext().chat`, so anything placed in
-that array is context whether it's displayed or not — `is_system` messages are
-still considered and hidden ones still cost tokens on some paths. The OOC channel
-therefore keeps its own transcript and renders to its own DOM, and never writes to
-`chat`, chat metadata, or `setExtensionPrompt`. `tests/ooc.test.mjs` asserts that
-against a mock context that throws if any of those are touched.
+On Windows, `install-windows.bat` runs the installer and helps locate Node. A
+browser refresh alone does not reload the server plugin. An old relay paired
+with a new browser extension will report a protocol mismatch.
 
-The only route from OOC into the roleplay is the explicit **To RP** button, which
-hands the text to SillyTavern's `/send` — the same mechanism Guided Generations'
-Simple Send wraps — so it posts as a normal message without asking for a reply.
-The text is passed through a scoped variable rather than interpolated into the
-command string, so a message containing pipes or braces can't be parsed as
-script. History is held by the relay, not the host, so someone joining late sees
-what was already agreed, and the channel survives a host reconnect.
+## Installing from scratch
 
-**Everyone keeps their own persona, and the model is told about all of them.**
-Personas stay local — nobody has to adopt anyone else's. What travels is each
-player's persona name, description, injection position and depth, a small
-portrait, and their persona lorebook if they have one.
+### Everyone: browser extension
 
-The host assembles that into two things. A roster block naming every player in
-the scene, so the model knows how many people it is talking to and does not merge
-them into one character — including players whose persona has no description,
-since they are still present and still speaking. And the lorebooks are merged into
-a real World Info book bound to the session chat, rather than keyword-scanned and
-pasted inline: that way SillyTavern activates them on the same code path as any
-other lorebook, so secondary keys, selective logic, insertion position, order,
-depth, probability, inclusion groups, recursion and the token budget all behave
-normally. Binding to the chat rather than globally means the book applies in the
-shared session and provably nowhere else, and it is unbound when the session ends.
+Install Guided Generations first:
 
-The Multiplayer panel reports exactly what reached the prompt — how many players
-are named, how many have descriptions, how many lorebook entries are active, and
-who has published nothing yet.
-
----
-
-## How a session works
-
-The host owns the chat and the API connection. Clients don't call an inference
-endpoint at all: a client's turn goes to the host, the host appends it,
-generates the reply with its own model and settings, and streams the result back
-to everyone. One canonical transcript, one prompt assembly, and joiners need no
-API keys of their own.
-
-```
-   Client browser                  Host machine
-  ┌──────────────┐        ┌──────────────────────────────┐
-  │ SillyTavern  │        │ SillyTavern                  │
-  │  extension   │        │  ├─ extension  (host UI)     │
-  │      │       │        │  └─ server plugin (relay)    │
-  └──────┼───────┘        └──────────┬───────────────────┘
-         │                            │
-         │   encrypted session        │  loopback, same
-         └────────────────────────────┤  handshake
-             ECDH + AES-256-GCM       │
-                                      └─→ the model / API
-```
-
----
-
-## Installing
-
-### 1. The extension (everyone)
-
-*Extensions → Install extension* → paste this repository's URL. Or clone it into
-your extensions folder yourself:
-
-| Scope | Path |
-|---|---|
-| Per user | `SillyTavern/data/<user>/extensions/SillyTavern-Multiplayer` |
-| Global | `SillyTavern/public/scripts/extensions/third-party/SillyTavern-Multiplayer` |
-
-**Guided Generations is required.** Install it first:
-
-```
+```text
 https://github.com/Samueras/GuidedGenerations-Extension
 ```
 
-`manifest.json` declares it as a hard dependency, so SillyTavern will refuse to
-load Multiplayer without it and say exactly what's missing. The reason is its
-**✈️ Simple Send** button: multiplayer needs a way to post a turn *without*
-triggering a reply, so several players can act before the model answers. Guided
-Generations already provides that button, and duplicating it would just mean two
-buttons doing the same job.
+Then use **Extensions > Install extension** with:
 
-Personas are read in a **room view** rather than one popup per player: a rail of
-everyone present down the left, the selected player's portrait, description and
-lorebook on the right. The organising question is not what a persona says but
-whether the model can see it, so every persona and lorebook carries a marker —
-filled when it is in the prompt, hollow when it has arrived but is not reaching
-the model — and the rail carries the same markers, so the state of the whole room
-reads without opening anyone. Lorebooks are a searchable list of entries with
-their keys shown as keys, rather than a truncated wall of text.
+```text
+https://github.com/PoweringManipulation2/Vibed-ST-Muliplayer
+```
 
-The room also gets a banner above the transcript saying who asked for a reply and
-whether it has started. In a single-player chat the state of the model is obvious
-— you pressed send, so you know something is coming — but in a shared room it is
-invisible, and everyone else keeps typing into a reply that is already being
-written. The turn then lands after the reply and reads as a non-sequitur. The
-typing indicator does not cover this: it says who is *composing*, which stops at
-the moment the interesting part begins.
+The dependency in `manifest.json` uses the folder name
+`GuidedGenerations-Extension`. A manually renamed checkout must match that
+name, or you must adjust the dependency to the actual folder name.
 
-Making that work took a protocol split, because Simple Send is indistinguishable
-from a normal send on the wire — both append a user message and both fire
-`MESSAGE_SENT`. A client therefore sends the text (`chat.turn`) and the intent to
-generate (`gen.request`) as separate messages, and the host only ever answers the
-second. The intent comes from the client's `generate_interceptor`, which
-SillyTavern runs *only* when it is genuinely about to generate, so Simple Send
-never produces one and no enumeration of Guided Generations' tools is required —
-its Thinking, Clothes and State guides, and anything added later, all behave
-correctly for free.
+A manual Multiplayer checkout can live in either extension location:
 
-One caveat about how ST resolves dependencies: the name it matches is the
-*folder* name, not anything inside Guided Generations' own manifest. Installing
-from the URL above produces `GuidedGenerations-Extension`, which is what's
-declared. If you cloned it into a differently-named folder, Multiplayer won't
-load — either rename the folder or edit the `dependencies` array in
-`manifest.json` to match.
+| Scope | Directory under SillyTavern |
+| --- | --- |
+| Per user | `data/<user>/extensions/<extension-folder>/` |
+| Global | `public/scripts/extensions/third-party/<extension-folder>/` |
 
-Joining a room needs nothing else. Only the host needs step 2.
+Joining someone else's room needs only the browser extension. Hosting needs
+the companion relay too.
 
-### 2. The relay (host only)
+### Host only: server relay
 
-SillyTavern loads server plugins from its own `plugins/` directory, so the relay
-has to be linked there. From inside the extension folder:
-
-On Windows, double-click **`install-windows.bat`**. It finds Node even when it
-isn't on PATH — the SillyTavern Launcher bundles its own copy and doesn't always
-add it — then runs the installer and tells you what to do next.
-
-Anywhere else, or from a terminal:
+From inside the installed extension folder:
 
 ```bash
 node install.mjs --enable
 ```
 
-Either way it links `./server` to `SillyTavern/plugins/st-multiplayer`, checks
-that `ws` resolves, and sets `enableServerPlugins: true` in `config.yaml`
-(backing the file up first).
+This links `server/` into `SillyTavern/plugins/st-multiplayer`, checks whether
+`ws` resolves from the SillyTavern installation, and enables server plugins.
+Changing `config.yaml` with `--enable` first creates a timestamped backup.
+Fully restart SillyTavern afterward.
 
-**Then fully restart SillyTavern.** Reloading the browser page does nothing:
-`loadPlugins()` only runs while the server is starting, so the server process
-itself has to restart.
-
-```bash
-node install.mjs                 # link only, just report on config.yaml
-node install.mjs --root /path    # point at SillyTavern explicitly
-node install.mjs --copy          # copy instead of link (Windows, Docker images)
-node install.mjs --uninstall     # remove it again
-```
-
-On startup the SillyTavern console — the terminal window, not the browser one —
-should print `Initializing plugin from …/plugins/st-multiplayer`.
-
-### "The Multiplayer server plugin is not available: HTTP 404"
-
-404 means the route was never mounted, so the plugin was not loaded at all.
-Exactly three things cause it, in order of likelihood:
-
-1. **The installer was never run.** Nothing is in `SillyTavern/plugins/`.
-2. **`enableServerPlugins` is not `true`** in `config.yaml`. ST returns an empty
-   cleanup function and skips the whole plugins directory without logging
-   anything, so this failure is completely silent.
-3. **SillyTavern was not restarted** after the first two were fixed.
-
-Joining a room is unaffected by all of this — only hosting needs the relay.
-
-A different status means something else: **403** is a non-admin account, **401**
-means reload and sign in again, and a version-mismatch message means the relay
-on disk is older or newer than the extension, so re-run the installer.
-
-`ws` is one of SillyTavern's own dependencies from 1.13 onward, so there is
-normally nothing to install. On an older tree: `npm install ws` in the
-SillyTavern root.
-
----
-
-## Using it
-
-**Host.** *Extensions → Multiplayer → Start hosting.* Copy the code and send it
-to whoever is joining. *Choose shared characters* picks what the room can see.
-*New code* invalidates the old one and drops everyone — useful if a code leaked.
-
-**Client.** *Extensions → Multiplayer*, paste the code, *Join*. If the extension
-check fails you'll get a diff and the sync option; after syncing, reload and
-rejoin.
-
-**Reaching the host.** Leave **Ask my router to open the port automatically**
-ticked and, in most cases, there is nothing else to do.
-
-That option asks the router directly, over NAT-PMP and UPnP — the two protocols
-consumer routers have implemented for decades, usually enabled out of the box.
-If it works, the relay learns the public address from the router and puts it
-straight into the connection code, so a code generated on your Wi-Fi works for
-someone in another state with no port forwarding, no account, and nothing
-installed. Both protocols are implemented here with Node builtins only: no
-dependency, and no third-party service in the path.
-
-The mapping is a one-hour lease that renews itself and is removed when hosting
-stops. If SillyTavern is killed without a clean exit, the hole closes on its own
-within the hour rather than staying open.
-
-When it does not work, the panel says why rather than leaving you guessing:
-
-- **The router did not respond.** Automatic mapping is switched off in its
-  settings, or there is a second router between you and the internet.
-- **Carrier-grade NAT.** The router reports its own "public" address as a private
-  one, which means the ISP is sharing it between customers. No protocol can open
-  a port through that.
-
-For either case, use one of these instead and put the address in **Address
-players connect to**:
-
-- **Tailscale** (or WireGuard, ZeroTier) — install on both machines, sign in to
-  the same account, use your `100.x.y.z` address. Works through CGNAT and exposes
-  nothing to the internet.
-- **Manual port forwarding** — forward the port on your router, use your public
-  IP.
-- **An HTTPS tunnel or reverse proxy** — Cloudflare Tunnel, ngrok, or your own
-  nginx. Put the public hostname in, **tick the HTTPS box**, leave the public
-  port at 0 if it is on 443. This is also the only option that works when a
-  player's own SillyTavern is served over HTTPS, since browsers refuse plain
-  WebSockets from an HTTPS page.
-
-The panel shows the exact URL players will dial next to the code, so a wrong
-address or a forgotten HTTPS tick is visible before anyone tries to join.
-
-### "Stuck on Connecting" forever
-
-The client reports this after three failed attempts with a checklist, because
-nothing answering at all is a network problem rather than a wrong-code or
-wrong-version problem. In rough order of likelihood:
-
-1. **The code contains a local address and the joiner is elsewhere.** A
-   `192.168.x.x` or `10.x.x.x` address cannot route to another house. Use
-   Tailscale or one of the other options above. The host's activity log warns
-   about this when it happens.
-2. **A firewall is blocking the port.** On Windows, Defender blocks incoming
-   connections to `node.exe` silently — no prompt, no log entry, nothing.
-3. **The host stopped hosting**, or rotated the code after sharing it.
-4. **The port is not forwarded** to the host machine.
-5. **The joiner's SillyTavern is served over HTTPS.** Browsers refuse plain
-   WebSocket connections from an HTTPS page, so this is refused up front with an
-   explanation rather than hanging.
-
-**Typing indicators.** While another player has the send box active you see
-"GreenHouse is typing…" above the composer, clearing three seconds after they
-stop. Only the started/stopped edges go on the wire, not keystrokes, and the
-relay stamps the author so nobody can type as somebody else.
-
-**Player chat.** The speech-bubble icon next to the send button opens and closes
-it, and carries an unread badge. Enter sends, Shift+Enter makes a new line.
-
-The panel can be dragged by its title bar, resized from the bottom-right grip,
-and collapsed to just the title bar with the **–** button or by double-clicking
-the title bar. Position, size and collapsed state are remembered between
-sessions, and are always clamped back into the viewport — so a panel saved on a
-large monitor never returns unreachable on a laptop. If it ends up somewhere
-awkward, **Reset its position** in the Multiplayer panel puts it back.
-
-**To RP** posts the composed text into the roleplay without asking for a reply —
-that, and only that, crosses over.
-
-Slash commands: `/mp-host`, `/mp-join <code>`, `/mp-leave`, `/mp-sync`,
-`/mp-status`, `/mp-ooc [message]` (opens the panel when given no text).
-
----
-
-## Security
-
-**What the encryption is for.** The relay runs on the host's own machine, so the
-attacker worth defending against is on the network path — shared Wi-Fi, a
-router, a VPS, a tunnel provider. Every frame is encrypted above the WebSocket
-layer, which means the guarantees are the same over plain `ws://` on a LAN as
-over `wss://` behind a proxy. It does *not* hide anything from the host, who
-owns the transcript and runs the model regardless.
-
-**Handshake.** Ephemeral ECDH on P-256, and the shared secret is concatenated
-with the connection code's pre-shared key *before* the KDF runs:
-
-```
-transcript = SHA-256("STMP/1 handshake" ‖ clientPub ‖ serverPub ‖ nonceC ‖ nonceS)
-okm        = HKDF-SHA256(ikm = ECDH ‖ psk, salt = transcript, info = "STMP/1 keys")
-```
-
-Folding the PSK into the input keying material rather than only MAC-ing
-afterwards is what authenticates the exchange. Someone in the middle can
-substitute public keys, but without the code they derive different keys and
-cannot forge either confirmation MAC, so the connection dies before any
-application data moves. Both sides prove knowledge of the PSK with an HMAC over
-the full transcript, compared in constant time. Ephemeral keys mean recording
-traffic and learning the code later decrypts nothing.
-
-**Records.** AES-256-GCM, separate keys and nonce salts per direction, nonce =
-`salt(4) ‖ counter(8)`, so no `(key, nonce)` pair repeats. The 10-byte header is
-authenticated as AAD, so rewriting a counter or flipping the compression flag
-fails authentication. A sliding-window replay guard rejects duplicates before
-any crypto work.
-
-**The code never travels.** The relay identifies a room by
-`SHA-256("STMP/1 room-id" ‖ psk)`, so a wrong code is rejected at the first
-message without the key itself ever going on the wire.
-
-**Authority.** Exactly one host per room, claimed with a token minted by the
-`/start` endpoint *and* required to arrive over loopback. Clients are held to an
-opcode allow-list: a client cannot publish a card catalogue, rewrite the
-transcript, or address other clients directly. Turns are routed to the host, not
-broadcast.
-
-**Player chat authority.** The relay stamps the author, id and timestamp on
-every OOC message and echoes it to the whole room including the sender, so no
-peer can post under someone else's name and every peer renders the channel in
-the same order. Messages are capped at 2000 characters, blanks are dropped, the
-room's history is a bounded ring buffer, and peers held at the parity gate can't
-talk to the room at all. Received text is rendered with `textContent`, never
-`innerHTML`.
-
-**Abuse resistance.** Bounded half-open handshakes, per-IP failure blocking with
-a cooldown, per-peer token buckets on both message count and bytes, a hard frame
-ceiling enforced by `ws` before any of this code runs, `maxOutputLength` on
-decompression to stop compression bombs, heartbeat-based culling, and kick/ban.
-
-**The control API.** SillyTavern calls `loadPlugins()` *after* its basic auth,
-IP whitelist, CSRF and login middleware, so `/api/plugins/st-multiplayer/*`
-inherits all of it. That's what makes it safe for `/start` to return the room's
-key: it only ever goes to the already-authenticated browser session of the
-person hosting. On top of that the plugin adds an admin check, `no-store` on
-secret-bearing responses, and strict validation before anything reaches the
-relay.
-
-**Please note.** This has not had an external security review. The handshake is
-a deliberately conservative construction out of standard primitives rather than
-anything novel, but "reviewed by its author and a test suite" is not the same as
-"audited". Treat it as good enough for playing with people you already trust,
-not as protection against a determined attacker.
-
----
-
-## Tests
+Other installer options:
 
 ```bash
-node tests/interop.test.mjs   # 52 checks — browser and Node crypto agree
-node tests/e2e.test.mjs       # 39 checks — real relay, real sockets
-node tests/ooc.test.mjs       # 25 checks — player chat cannot reach a prompt
-node tests/hunt.test.mjs      # 13 probes — adversarial; findings, not a gate
-node tests/portmap.test.mjs   # 16 checks — router protocols, parsing, SSRF guard
-node tests/sync.test.mjs      # 18 checks — extension sync actually installs things
-node tests/cards.test.mjs     # 19 checks — the card-sharing chain end to end
-node tests/lore.test.mjs      # 22 checks — shared persona lorebooks and the roster
-node tests/session.test.mjs   # 49 checks — chat containment and persona payload
+node install.mjs                         # link and inspect config, without changing it
+node install.mjs --root /path/to/ST       # specify the SillyTavern root explicitly
+node install.mjs --copy                   # copy the relay instead of linking it
+node install.mjs --uninstall              # remove the installed relay
 ```
 
-`interop` matters because the key schedule and frame format are implemented
-twice, in WebCrypto and in Node's `crypto`. It proves both halves derive the
-same keys, verify each other's MACs, and can open each other's frames — and that
-tampering, replays and cross-session frames are rejected.
+A copied relay does not follow later extension updates; rerun the installer.
+The installer prints a warning if `ws` cannot be resolved. The standalone test
+setup described below is not required merely to use the extension.
 
-`e2e` starts the actual relay on a loopback port and drives it with the actual
-browser transport (Node 20+ has a global `WebSocket`, so `lib/transport.js` runs
-unmodified). It covers role assignment, the parity gate, opcode authority,
-capacity, kick, rotation and clean port release.
+## Playing a session
 
-`ooc` drives the real channel against a mock context whose `chat`,
-`chatMetadata` and `setExtensionPrompt` are watched, and fails if anything lands
-in them. It also covers truncation, name spoofing, and malformed payloads.
+**Hosting.** Open **Extensions > Multiplayer**, choose the characters to share,
+and start hosting. Share the connection code privately. The code contains the
+connection information and a room secret. **New code** invalidates the old one
+and disconnects the current peers.
 
-`hunt` is deliberately adversarial: it fills the room with peers who can never be
-admitted, disconnects the host and reconnects, claims the host slot twice,
-abandons transfers, floods the rate limiter and runs a 5000-turn session looking
-for unbounded growth. It exits zero regardless, because its job is to surface
-findings rather than gate a release.
+Open a shared character using its session control. The host gets a dedicated
+session copy rather than writing multiplayer turns into the original
+character's private chat. That session copy is reused on later sessions.
 
-Seven bugs came out of writing these, all fixed:
+**Joining.** Paste the code into Multiplayer and press **Join**. If the enabled
+extension sets do not match and parity checking is enabled, the panel shows a
+diff. **Sync extensions** offers a plan before making changes. Review it:
+reinstalling an extension can discard local modifications, and removing extras
+is a separate destructive option. Reload and rejoin after syncing.
 
-- Frame handling is asynchronous, so an unserialised handler let the relay's
-  `welcome` be processed before the `accepted` that installs the session keys —
-  killing valid sessions non-deterministically. Inbound frames are now chained
-  on both sides.
-- `stop()` resolved on a timeout race while the listener was still bound, so
-  stop-then-start on the same port failed with `EADDRINUSE`. Sockets are now
-  terminated first and the close is actually awaited.
-- The host was seated silently, so its UI never left "checking extensions" and
-  it never published its shared cards. Admission now runs through one code path
-  that always announces itself.
-- The OOC panel's unread counter was cleared inside a DOM guard, so the state
-  machine's behaviour depended on whether the panel happened to be mounted.
-- The panel could not be closed at all. It is shown and hidden with the `hidden`
-  attribute, but `#stmp_ooc_panel { display: flex }` is an author-origin ID rule,
-  and author rules beat the browser's built-in `[hidden] { display: none }`
-  regardless of specificity — so `hidden` had no visual effect. The close button
-  looked dead and the panel was visible before it was ever opened. Fixed with an
-  explicit `#stmp_ooc_panel[hidden] { display: none }`.
-- Reopening a panel that had been collapsed left it collapsed, so clicking the
-  icon appeared to do nothing — the same "state behind a DOM guard" mistake as
-  above, made a second time. Every state change in `openPanel` now happens above
-  the guard, with a comment saying why.
-- Room capacity counted *every* connected peer rather than admitted ones, so
-  anyone held at the extension-parity gate occupied a seat. A group who all
-  needed to sync could fill the room and lock out someone who was ready to play,
-  with the host seeing only "room full". Capacity now counts admitted peers, and
-  the lobby has its own smaller cap.
-- Peers held in the lobby were never dropped. They answer heartbeats perfectly
-  well, so the liveness timeout could never remove them and their slot leaked for
-  the life of the room. There is now a 90-second lobby timeout.
-- Advertising a non-loopback address with "Allow players on my local network"
-  switched off is a guaranteed failure — the relay binds `127.0.0.1`, the code
-  looks correct, and every joiner hangs forever. Now refused up front with an
-  explanation.
-- `ChatBridge` remembered every message id for the life of the session purely to
-  detect echoes, which only ever arrive moments after sending. A long session
-  accumulated all of them; the sets are now bounded windows.
-- The connection code could only express `ws://host:port`, so an HTTPS tunnel or
-  reverse proxy — the most accessible way to play across the internet, and the
-  only one that works when a player's SillyTavern is on HTTPS — was impossible.
-  Codes can now carry a TLS endpoint and a default port.
-- Tailscale addresses were warned about as "local network only". They are in
-  carrier-grade NAT space, which the check treated as private, but a tailnet
-  reaches across the internet and is the recommended setup — so the warning sent
-  people looking for a problem they did not have.
-- Cross-network play required either router configuration or a mesh VPN, i.e. a
-  setup loop per player. The relay now asks the router to open the port itself
-  over NAT-PMP and UPnP, and uses the public address the router reports.
-- Port-mapping discovery originally probed each candidate gateway in sequence, so
-  hosting blocked for four and a half seconds before a code appeared. Candidates
-  and protocols are now raced under a 2.6-second ceiling.
-- **Persona lorebooks were keyword-scanned and pasted inline.** That quietly
-  ignored secondary keys, selective logic, per-entry scan depth, whole-word and
-  case sensitivity, insertion position, order, at-depth placement, probability,
-  inclusion groups, recursion and the token budget — an entry configured to sit at
-  depth 4 as an assistant note was dumped inline as system text instead. They are
-  now merged into a genuine World Info book bound to the session chat, so
-  SillyTavern activates them itself.
-- **Players with no persona description were invisible to the model.** They were
-  filtered out of the injected block entirely, so the model did not know they
-  existed even as they spoke. Every player is now named in a roster line.
-- **Remote messages wore the receiver's own face.** The portrait capture read
-  `power_user.default_persona`, which is the *favourite* persona and stays null
-  unless explicitly set — so no portrait was ever captured and every remote
-  message fell back to whatever avatar the receiver had. It now reads the active
-  persona (`user_avatar`), with the stored per-avatar record as a fallback.
-- **The "another player" badge landed on the wrong message and never on old ones.**
-  It decorated whatever was last in the DOM on the next animation frame, so an
-  auto-reply rendering in between stole the badge — and nothing ever decorated
-  messages already on screen. Messages now carry their author's identity, badges
-  are addressed by `mesid`, and the whole rendered window is swept whenever the
-  chat changes.
-- **Only the host's persona reached the prompt.** The injection included the
-  local persona, which SillyTavern already injects — so the block looked populated
-  even when no peer persona had arrived, hiding the real problem. Own persona is
-  now excluded, and the panel reports exactly whose personas are in the prompt.
-- **A transcript snapshot discarded attribution.** Anyone joining mid-session got
-  history with no indication of who said what, which was most of their transcript.
-- **A client's message produced no reply.** The turn was appended to the host's
-  chat and nothing ever asked the model to answer it, so a player could speak into
-  silence. The host now triggers a reply through `/trigger`, which generates
-  without adding another user message and waits for any generation already in
-  flight. There is a toggle for hosts who would rather several players act first.
-- **The reply appeared twice on clients.** Streaming tokens are coalesced on an
-  80ms timer, so one could be emitted *after* generation ended and after the
-  finished message had been delivered — at which point the receiver built a fresh
-  streaming placeholder holding the full text, which reads as a duplicate. The
-  timer is now cancelled when generation ends, and receivers refuse tokens outside
-  an active stream.
-- **Shared personas never reached the model.** Descriptions travelled to the host
-  and were stored, but nothing put them in front of the model — so it saw several
-  different speaker names and knew none of them, and replied as though talking to
-  one anonymous user. The host now injects every remote player's persona through
-  `setExtensionPrompt` at generation time, including lorebook entries whose
-  keywords appear in recent chat.
-- **Every remote player wore the receiver's own face.** A user message with no
-  `force_avatar` renders with the local persona picture, and a peer's avatar file
-  only exists on that peer's machine. Personas now carry a downscaled 96px data
-  URL, and remote turns set `force_avatar` from it.
-- **A chat turn overwrote the full persona.** Turns deliberately carry a
-  lightweight persona so they are not delayed by a lorebook read or a portrait
-  capture — but that partial payload replaced the complete one, so the portrait
-  and lorebook were discarded after the first message. Updates now merge.
-- **Nothing marked a message as another player's.** Same bubble, same styling,
-  only a different name. Remote messages now get a border and an "another player"
-  badge, applied defensively so a rendering failure can never break delivery.
-- **The shared roleplay used the host's original character and its existing
-  chat**, mixing a multiplayer session into a private history with nothing to
-  distinguish the two. The host now gets a dedicated session copy, marked as such,
-  created on first use; the original is never touched.
-- **Clients could never see the host's persona.** The relay forwarded host frames
-  verbatim, so identity-bearing payloads arrived anonymous. The roster keys
-  personas by peer id, so the host's own persona could not be matched to the host
-  and no profile appeared for them. Host frames are now stamped, and the relay
-  caches personas so a peer joining later learns who everyone is playing rather
-  than having missed the announcement.
-- **The host had no way to see or enter a shared session.** It existed only as
-  internal state that followed whatever chat happened to be open, with nothing
-  indicating what was shared or how to get there. There is now a Shared session
-  panel listing every shared character, marking the live one, and opening it in
-  one click.
-- **Shared card fields stayed empty even after hydration.** Two causes. A
-  definition could arrive before `getCharacters()` had refreshed, so the lookup
-  found nothing and the hydration was dropped on the floor — definitions are now
-  parked and retried. And hydration mutates the in-memory character, which is
-  enough for prompt building but not for the editor fields, which were filled from
-  the object when the card was selected; the panel is now repainted.
-- **Chat leaked into unrelated chats.** The bridge relayed whatever chat happened
-  to be open and wrote inbound messages into whatever chat the receiver had open,
-  so a hosted character's greeting could land in the assistant chat that opens on
-  startup — and a client's private local roleplay would be broadcast to the room.
-  There is now an explicit room session: the host designates one shared character,
-  and chat only moves when both ends are in that chat.
-- **Shared cards arrived with every field empty.** Definitions were only fetched
-  when a card was clicked, so the character list showed name-only stubs with no
-  description, greeting or lorebook. Definitions are now pulled as soon as the
-  catalogue arrives, still held in memory only.
-- **Personas carried only a name and a description.** SillyTavern injects a
-  persona at a configured position, depth and role, and a persona can have a
-  lorebook bound to it — none of which travelled, so the host's model had far less
-  to work with than the player expected. All of it is sent now, lorebook included.
-- **Only the host could edit or delete.** Any player can now, and edits are
-  addressed by message id rather than index, which drifts as soon as two peers'
-  views differ by one message.
-- **Sharing characters shared nothing, and said so.** The picker read its
-  checkboxes after `callGenericPopup` resolved, but SillyTavern removes the
-  dialog from the DOM before `show()` settles — so the query matched nothing, the
-  selection was always empty, and the panel honestly reported "Sharing 0
-  characters". Selection is now captured both by a delegated change listener and
-  by an `onClosing` handler that reads the popup while its DOM still exists.
-- **Extension sync installed nothing at all, silently.** The parity report
-  stripped `homePage`, and `remoteUrl` was only populated in the non-default
-  `commit` strictness mode — so `buildSyncPlan` had no URL for anything, every
-  entry became an "install this yourself" step, and pressing Sync reported
-  success while doing nothing. The report now carries `homePage`, and the host
-  can be asked for real git remotes on demand when Sync is pressed.
-- `deleteExtension` builds its hook name as `'third-party' + name` with no
-  separator, so passing a bare folder name resolved to `third-partyFoo` and the
-  extension's own delete hook never ran. SillyTavern's own UI passes `/Foo`;
-  this now does too.
-- Sync reported failures as "N step(s) failed, see the log", which is not
-  something anyone can act on. It now lists each failure with its reason and URL.
-- The connection code's address, port and scheme were decided in two places —
-  once when hosting started and once when the code was rotated — and the two had
-  drifted. Rotation ignored the router-supplied public address, so rotating a
-  working code silently downgraded it to a LAN address remote players could not
-  reach. Both now call one tested function.
-- Ticking "behind an HTTPS tunnel" without supplying a hostname produced a
-  `wss://` code aimed at the router's own address on port 443, where nothing is
-  listening. That combination is now refused with an explanation, since it is an
-  easy thing to reach for when you have no address to type.
-- `portMapping` and `publicHost` were added to `status()` but not `describe()`,
-  and `/start` returns `describe()` — so the host UI never received either, and
-  the automatic address could not be used. Caught by probing the real return
-  value rather than reading the code.
+**Sending turns.** The host owns the canonical transcript and performs model
+generation. A normal client send can request a reply when the host enables
+**Answer when a player asks for a reply**. Guided Generations' **Simple Send**
+posts a turn without requesting generation, so several players can act first.
+Typing indicators and the generation-status banner show what is happening.
 
----
+**Player chat.** The speech-bubble button opens the separate out-of-character
+panel. Its messages do not enter the model's chat array or prompt through this
+extension. **To RP** explicitly posts a composed message into the roleplay. The
+panel remembers its position and size; **Reset its position** restores it.
+The relay keeps a bounded, in-memory player-chat history, not an archival log.
 
-## Layout
+**Personas and lore.** Each player keeps their own selected persona. The room
+view shows the current players, portraits, descriptions, and persona lorebooks.
+The host builds the player roster for the prompt and uses a session-bound World
+Info book for shared lore. Lorebook activation is delegated to SillyTavern, not
+a separate substring matcher. The panel reports the roster and lore state.
 
+## Persistent sharing: what is remembered
+
+Bookkeeping lives in SillyTavern's normal extension settings at
+`extension_settings.multiplayer.sharing`. It contains a storage-schema version,
+a local `ownerId`, stable `cardSources` and `personaSources`, and filename /
+revision receipts in `remoteCards`, `sessionCards`, and `remotePersonas`.
+It does not store the room secret or full remote character definitions.
+
+| Situation | Behavior |
+| --- | --- |
+| Reconnect, reopen the page, or join another room with the same source | Find and reuse the already mapped local copy. |
+| Receive the same item concurrently or repeatedly | Serialize work for that identity; verify the saved copy; do not import again. |
+| Host edits a definition, name, tags, or portrait | Update the mapped filename and refresh the in-session definition. |
+| Different owners use the same display name | Keep separate identities; never merge just by name. |
+| Host renames a card through SillyTavern's rename event | Move its source-ID mapping to the new filename. |
+| Local mapped file was deleted | Recreate the same deterministic filename after confirming it is missing. |
+| Request fails, authentication fails, or disk lookup returns a server error | Report the failure; do not treat it as permission to create another file. |
+| Import finishes but its response is lost | Recover the deterministic file and its marker on the next sync. |
+| Host stops sharing a card or the session disconnects | Clear its received definition from memory; retain the saved stub and chats. |
+
+The authoritative marker is `data.extensions.st_multiplayer` in the saved card.
+New filenames are derived from the stable identity, not from a display name or
+room code. The implementation checks the saved marker before editing and checks
+the saved revision afterward. Only a definite missing-file response permits
+creation. An unrelated file occupying the reserved filename is a conflict, not
+a file that can be overwritten.
+
+Content hashes cover actual definition and portrait contents, not their length.
+Same-size portrait changes and deleted definition fields are therefore not
+silently missed. Receipt revisions advance only after the write is verified.
+Where supported, Web Locks coordinate the same item across browser tabs as well
+as within the page. This is not a transactional replacement for SillyTavern's
+own settings storage; simultaneous independent server sessions should still be
+used cautiously.
+
+Keep settings backed up. Resetting the host's owner/source identities makes it
+look like a different source. Renaming or moving character files outside
+SillyTavern does not fire its rename event and may require manual recovery.
+These IDs are synchronization identifiers, not public-key proof of authorship.
+
+### Persona handling is not the same as character-card importing
+
+The normal `index.js` extension keeps remote personas in the room view and
+prompt state. It **does not automatically create a local Persona Management
+entry for every remote player**. A reconnect replaces obsolete peer-ID entries,
+a departure removes them, and an updated portrait/description/lorebook replaces
+that player's current data. Switching to a different persona clears stale
+fields from the previous one.
+
+The separate, legacy `mp-personas.js` integration helper is not loaded by
+`index.js`. For integrations which explicitly use that helper to save remote
+personas, it now reserves a deterministic avatar filename, remembers it across
+reloads, and updates that same file instead of importing timestamp-named copies.
+Legacy helper receipts are adopted when they can identify an existing file.
+Changing a remote description or portrait no longer requires deleting and
+reimporting that persona.
+
+### What is and is not persisted
+
+Clients automatically save a **stub** with identifying metadata, a portrait,
+and the Multiplayer marker. Full host character definitions are received and
+applied to in-memory character objects while the session is connected. The
+extension's automatic card and portrait write paths use clean disk data rather
+than serializing those hydrated objects. Disconnect restores their baselines.
+A card is only enabled when it is available in the currently connected host's
+catalogue, not merely because some room is connected.
+
+This is **not DRM**. Players receive the definition and can inspect or copy it.
+Manual saving, exports, browser behavior, and other extensions are outside that
+automatic-write guarantee. Chat transcripts can be saved normally, and shared
+persona/card lore may be written to the existing session World Info book. That
+book is unbound when the session ends; this does not promise to erase every
+previously saved lore file. Host-side session copies contain the host's own
+character definition and are intentionally saved on the host.
+
+## Recovering an installation that already has duplicates
+
+Open **Shared storage / recovery**. The report shows remembered copies,
+operation counts, extension-marked duplicate groups, and legacy cards without
+stable owner/source IDs. It is read-only until you explicitly choose a linking
+action. Its coverage is the current SillyTavern character list, not a forensic
+scan of every file on disk or a deduplicator for unrelated extensions.
+
+An exact legacy card ID in the same room can be adopted automatically. An old
+room-derived ID usually cannot prove identity across a new code or room. While
+connected to the correct host, choose both the currently shared character and
+the **existing legacy remote copy to keep**, then confirm **Link selected
+copy**. This preserves that local filename and uses it for subsequent updates.
+If the room changes while the dialog is open, linking is cancelled.
+
+Linking is limited to extension-marked remote legacy cards. It refuses an
+original local character, a host session copy, or a copy already assigned to a
+different stable source. Linking neither deletes the other copies nor merges
+their chat histories. Review backups and histories before manually deleting
+anything. Unmarked legacy personas cannot safely be matched just by name.
+
+Use **Resync shared data** after correcting a failed write, changing a portrait
+through a path that did not emit an event, or completing recovery. It republishes
+the local persona and asks for the shared catalogue again. It does not erase
+identity receipts. `/mp-storage` produces a read-only JSON report; `/mp-resync`
+performs the same resynchronization as the button.
+
+## Connectivity and troubleshooting
+
+The default relay port is `8899`. The address embedded in the code must be
+reachable from the joining computer; the panel displays the actual endpoint.
+**Allow players on my local network** controls non-loopback binding. The router
+mapping option attempts NAT-PMP/UPnP; success depends on the network and is not
+guaranteed. Failed mapping is reported without the old `kind is not defined`
+exception.
+
+For Tailscale or another private network, use the host's reachable private-network
+address, allow the connection in that network and the host firewall, and permit
+non-loopback listening. Do not advertise `localhost` to another computer.
+For a tunnel or reverse proxy, advertise its hostname and forwarded port, and
+select the HTTPS option only when that endpoint actually supports secure
+WebSockets. An HTTPS browser page needs a compatible secure WebSocket endpoint;
+application-level encryption does not bypass browser mixed-content rules.
+
+| Symptom | Check |
+| --- | --- |
+| `kind is not defined` | Replace the old browser files and reload; the failing warning path is fixed in 1.4.0. |
+| Constant join/leave or rapidly growing persona list | Update **both** relay and clients, restart the host server, and close stale tabs. The welcome echo loop and stale persona entries are fixed. Other network faults can still disconnect a peer. |
+| Protocol mismatch | Reinstall the relay from the updated extension folder, restart the server, and reload all peers. |
+| Plugin HTTP 404 | Confirm the relay is installed, server plugins are enabled, startup did not report an import/dependency error, and the server was restarted. |
+| Plugin HTTP 401/403 | Check the signed-in session and host account's admin permission. |
+| Connection attempts never reach the host | Verify the advertised address/port, firewall, binding, private-network access, and tunnel settings. |
+| An existing copy cannot be verified | Correct the access/server problem, then resync. The extension intentionally stops instead of creating a speculative duplicate. |
+| A definition or portrait remains old | Save the host edit, use resync, and inspect the activity log for a refused revision, image, or write. |
+
+Automatic reconnect respects its checkbox. Retryable failures use backoff and
+jitter, with at most eight consecutive unstable retries. A connection that stays
+open for a minute resets that retry budget. Fatal protocol/authentication errors
+stop immediately; use Leave and Join after correcting the cause. Outgoing data
+is paced so ordinary synchronization is less likely to trigger the relay's
+message/byte limits. Streaming snapshots are coalesced at about four per second;
+large catalogues and images can still take time to synchronize.
+
+## Commands
+
+| Command | Purpose |
+| --- | --- |
+| `/mp-host` | Start hosting and return the room code. |
+| `/mp-join <code>` | Join a room. |
+| `/mp-leave` | Leave the active session. |
+| `/mp-sync` | Review extension parity and synchronization. |
+| `/mp-status` | Report session status. |
+| `/mp-ooc [message]` | Open player chat, or send a player-chat message. |
+| `/mp-storage` | Return the read-only shared-storage report. |
+| `/mp-resync` | Republish/request shared data without clearing receipts. |
+
+## Security and trust
+
+Transport uses ephemeral P-256 ECDH, a code-derived pre-shared key, HKDF-SHA256,
+and AES-256-GCM with separate directional keys and counters. Browser and relay
+implementations have interoperability tests, replay checks, frame-size limits,
+heartbeat handling, and rate limits. The protocol constants are mirrored and
+tested together. This release is **not an independent security audit**.
+
+The relay runs on the host's machine and can access the shared session data.
+Encryption is not intended to hide that data from the host or admitted players.
+Protect the connection code as a credential and share only content you are
+comfortable sending to those players. A host token and loopback check distinguish
+host authority; clients cannot announce the host's catalogue or directly route
+authorized host-only messages. A targeted reply to a departed peer is discarded
+rather than accidentally broadcast to everyone.
+
+The control routes use SillyTavern's server middleware and an additional admin
+check. OOC text is rendered as text, not HTML. Bounded transfers and retry limits
+reduce accidental overload; they are not a guarantee against every malicious
+or incompatible peer. Browser extension trust and model-provider privacy are
+separate from this transport layer.
+
+## Development and tests
+
+For the standalone regression runner, use Node 22 or newer. It needs Node's
+native WebSocket client and WebCrypto as well as the `ws` server dependency:
+
+```bash
+npm install
+npm test
+npm run test:hunt
 ```
-manifest.json          UI extension manifest
-index.js               entry point, settings, hooks, slash commands
-settings.html          settings drawer
+
+`npm test` runs each suite in a fresh process and fails if any suite fails or
+exceeds its timeout. The recorded 1.4.0 run passed **336 checks across 14 suites**.
+It includes the real relay, real transport and crypto, and storage-adapter tests
+covering 100 simultaneous deliveries, 100 repeated unchanged synchronizations,
+10 join/leave cycles plus an automatic retry, changed revisions, failed writes,
+lost responses, owner/name collisions, and conservative legacy recovery.
+
+The separate hunt suite reported **13 passes and zero findings**. Its runner is
+an informational probe rather than the main regression gate, so inspect its
+output. An offline Chromium DOM smoke test passed **59 assertions**, including
+10 UI mount/destroy cycles, late template completion, card gating, and stale
+recovery-dialog rejection. That test mocks SillyTavern's context; it is not a
+substitute for testing the whole application.
+
+To run the browser smoke page manually, serve the repository with a local static
+server and open `tests/ui-smoke.html`. For example:
+
+```bash
+python -m http.server 9000 --bind 127.0.0.1
+# Open http://127.0.0.1:9000/tests/ui-smoke.html in a browser.
+```
+
+See [TEST_REPORT.md](TEST_REPORT.md) for precise environment details, API review
+references, test boundaries, and a two-instance manual acceptance checklist.
+
+## Source layout
+
+```text
+index.js                 extension lifecycle, settings, slash commands
+settings.html            settings drawer, storage/recovery and resync buttons
 style.css
 lib/
-  protocol.js          frame layout, opcodes, limits, connection codes
-  crypto.js            WebCrypto: ECDH P-256, HKDF, AES-256-GCM
-  transport.js         handshake, backpressure, reconnect
-  session.js           host/client orchestration
-  parity.js            fingerprinting, diffing, sync execution
-  cards.js             stub cards, hydration, chunked avatars
-  chat.js              chat relay
-  lore.js              merges peers' persona lorebooks into a World Info book
-  ooc.js               player-only channel (never touches context.chat)
-  typing.js            per-player typing indicators
-  ui.js                panel, cloud badges, sync dialog
-server/                ← linked into SillyTavern/plugins/st-multiplayer
-  index.js             plugin entry: info / init / exit + control API
-  lib/protocol.js      mirror of lib/protocol.js  (KEEP IN SYNC)
-  lib/crypto.js        Node crypto, wire-compatible with lib/crypto.js
-  lib/relay.js         WebSocket relay, rooms, parity gate, limits
-  lib/portmap.js       NAT-PMP and UPnP port mapping, zero dependencies
-install.mjs            links the relay into SillyTavern's plugins directory
-tests/
+  identity.js            durable identities, canonical hashes, write queues
+  card-store.js          verified create/reuse/update and legacy recovery
+  cards.js               card shapes, ST API adapters, RAM hydration, chunks
+  transport.js           handshake, socket lifecycle, backoff, encrypted sends
+  send-budget.js         cancellable message/byte pacing
+  session.js             host/client orchestration and ordered synchronization
+  chat.js                roleplay relay and stable room persona state
+  protocol.js            opcodes, revision, limits, connection codes
+  crypto.js              browser WebCrypto implementation
+  parity.js              extension comparison and reviewed sync plans
+  lore.js                session World Info integration
+  ooc.js                 separate player-chat channel and panel
+  typing.js              typing state
+  ui.js                  settings UI, cloud-card gating, recovery dialog
+mp-personas.js           optional legacy persona import helper, not live entrypoint
+server/
+  index.js               server plugin and authenticated control routes
+  lib/protocol.js        wire constants mirrored with lib/protocol.js
+  lib/crypto.js          Node crypto implementation
+  lib/relay.js           room authority, routing, admission and limits
+  lib/portmap.js         NAT-PMP/UPnP mapping
+install.mjs              relay installer
+install-windows.bat      Windows installer launcher
+tests/                   regression suites, mock ST store, browser smoke page
+TEST_REPORT.md           recorded validation and remaining manual checks
 ```
 
-`lib/protocol.js` and `server/lib/protocol.js` are deliberate mirrors. Both
-peers exchange `PROTOCOL_REVISION` during the handshake and refuse to continue
-on mismatch, so letting them drift fails closed instead of corrupting state
-silently. `tests/interop.test.mjs` asserts they agree.
+## Limits
 
----
+The host remains a single point of failure; there is no host migration. One
+character is active at a time, and group-chat synchronization is not implemented.
+Client transcripts mirror the host; branching, editing, and swipes are host-side
+actions. Saved chats and session lore are separate from the character-stub cache.
+The peer limit is eight, and a received catalogue is limited to 512 cards.
 
-## Limits and rough edges
-
-- **The host is a single point of failure.** If the host disconnects, clients
-  are told and wait; there is no host migration.
-- **Clients mirror the host's chat.** Swipes, branching and message editing are
-  host-side actions. A client's local chat file becomes a transcript of the
-  session.
-- **Group chats are not synced.** One character at a time.
-- **Player chat is not stored anywhere.** The relay keeps the last 200 messages
-  in memory only. Stop the relay and the planning history is gone.
-- **Commit-level parity is slow.** The exact mode pins each extension's git
-  commit, which costs a `git fetch` per extension. Results are cached for five
-  minutes; the default name-and-version mode is instant and catches every
-  practical mismatch.
-- **Sync can't install what isn't public.** Extensions the host installed by
-  hand, with no git remote, are listed for manual installation.
-- **Reinstalling to change versions is destructive.** Matching a pinned commit
-  deletes and re-clones that extension, which discards local modifications to
-  it.
+Git-commit parity can be slower than name/version parity. Extensions without an
+installable repository URL require manual handling. Updating a pinned extension
+by deleting and recloning it can lose local changes. Back up first and review the
+plan. Persistent identity depends on retained settings/markers; this release
+does not globally deduplicate arbitrary cards or automatically delete old data.
 
 ## Licence
 
-AGPL-3.0, matching SillyTavern.
+AGPL-3.0, matching the repository's existing licence.

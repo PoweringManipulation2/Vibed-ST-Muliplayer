@@ -80,6 +80,7 @@ class Peer {
 
         this.keys = null;
         this.sendCounter = 0n;
+        this.sendChain = Promise.resolve();
         this.replay = new ReplayWindow();
 
         // Refill rates are expressed per millisecond so a burst is allowed but
@@ -707,11 +708,13 @@ export class Relay {
                 if (typeof payload.t === 'number') peer.rtt = Math.max(0, Date.now() - payload.t);
                 return;
 
-            case OP.ROSTER:
-                // Peers announce their display name with this opcode.
-                peer.name = String(payload.name ?? 'Player').slice(0, 40) || 'Player';
-                if (peer.role === ROLE.HOST) this.#broadcastHostName();
+            case OP.ROSTER: {
+                const name = String(payload.name ?? 'Player').slice(0, 40) || 'Player';
+                if (peer.name === name) return; // duplicate announcements are no-ops
+                peer.name = name;
+                if (peer.role === ROLE.HOST) await this.#broadcastHostName();
                 return this.#broadcastRoster();
+            }
 
             case OP.PARITY_REPORT:
                 return this.#onParityReport(peer, payload.report);
@@ -747,8 +750,13 @@ export class Relay {
             const outgoing = STAMP_IDENTITY.has(op)
                 ? { ...payload, from: peer.id, name: peer.name }
                 : payload;
-            const target = payload.to ? this.peers.get(payload.to) : null;
-            if (target) return this.#send(target, outgoing);
+            if (payload.to) {
+                const target = this.peers.get(payload.to);
+                // A departed recipient must not turn a private catch-up into a
+                // broadcast to everyone else in the room.
+                if (target?.admitted) return this.#send(target, outgoing);
+                return;
+            }
             return this.#broadcast(outgoing, { except: peer.id });
         }
 
@@ -922,15 +930,20 @@ export class Relay {
     // =======================================================================
 
     async #send(peer, payload) {
-        if (!peer || peer.socket.readyState !== 1) return;
-        try {
-            const counter = ++peer.sendCounter;
-            const frame = await sealFrame(peer.keys, counter, payload);
-            peer.socket.send(frame);
-            peer.bytesOut += frame.length;
-        } catch (error) {
-            this.log('warn', `Failed to send to ${peer.id}: ${error.message}`);
-        }
+        if (!peer) return;
+        peer.sendChain = peer.sendChain.catch(() => {}).then(async () => {
+            if (peer.socket.readyState !== 1 || !peer.keys) return;
+            try {
+                const counter = ++peer.sendCounter;
+                const frame = await sealFrame(peer.keys, counter, payload);
+                if (peer.socket.readyState !== 1) return;
+                peer.socket.send(frame);
+                peer.bytesOut += frame.length;
+            } catch (error) {
+                this.log('warn', `Failed to send to ${peer.id}: ${error.message}`);
+            }
+        });
+        return peer.sendChain;
     }
 
     async #broadcast(payload, { except = null } = {}) {
@@ -947,7 +960,7 @@ export class Relay {
     }
 
     async #broadcastHostName() {
-        await this.#broadcast({ op: OP.WELCOME_UPDATE ?? 'welcome', hostName: this.host?.name });
+        await this.#broadcast({ op: OP.WELCOME_UPDATE, hostName: this.host?.name });
     }
 
     #sendJson(socket, object) {

@@ -275,10 +275,11 @@ await probe('stop() completes while peers are mid-session', async () => {
 
 await probe('an abandoned avatar transfer does not leak forever', async () => {
     const assembler = new ChunkAssembler();
-    // Start ten transfers and never finish any of them.
-    for (let i = 0; i < 10; i++) {
+    // The new global cap allows eight incomplete transfers, then refuses more.
+    for (let i = 0; i < 8; i++) {
         assembler.push({ cardId: `card-${i}`, seq: 0, total: 5, bytes: new Uint8Array(1024) });
     }
+    assert.throws(() => assembler.push({ cardId: 'overflow', seq: 0, total: 5, bytes: new Uint8Array(1024) }), /Too many/);
     assembler.clear();
     // After clear() nothing should remain; a fresh push must start clean.
     const done = assembler.push({ cardId: 'card-0', seq: 0, total: 1, bytes: new Uint8Array(8) });
@@ -291,6 +292,8 @@ await probe('rate-limited peers are dropped without wedging the relay', async ()
     const flooder = await joinClient(room, { name: 'Flood' });
     await flooder.seen.waitForOp(OP.PARITY_RESULT);
 
+    // Bypass normal client pacing to exercise the relay's hostile-peer limiter.
+    flooder.client._sendBudget = { take: async () => true };
     for (let i = 0; i < LIMITS.RATE_MESSAGES * 4; i++) {
         flooder.client.send({ op: OP.OOC_MESSAGE, text: `x${i}` });
     }
